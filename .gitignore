@@ -11,3 +11,7 @@ wheels/
 
 # Streamlit の秘密情報。絶対にGitに載せない
 .streamlit/secrets.toml
+
+# ローカル起動時のログとPID
+.streamlit_server.log
+.streamlit_server.pid
