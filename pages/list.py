@@ -3,11 +3,16 @@ import streamlit as st
 
 from auth import require_password
 from db import query
-from theme import CALC_BG
+from theme import CALC_BG, compact_css
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
+compact_css()
 
-st.title("物件一覧")
+head = st.columns([4, 1])
+head[0].markdown("### 物件一覧")
+with head[1]:
+    if st.button("＋ 物件を登録", width="stretch"):
+        st.switch_page("pages/new.py")
 
 # ── 絞り込み ────────────────────────────────────────────────
 c1, c2, c3 = st.columns([2, 2, 3])

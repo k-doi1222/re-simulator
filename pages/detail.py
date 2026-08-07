@@ -15,27 +15,10 @@ import streamlit as st
 
 from auth import require_password
 from db import execute, query
-from theme import CALC_BG
+from theme import CALC_BG, compact_css
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
-
-# 自動計算値のブロックを一覧の計算値列と同じ色で塗り、入力値と見分けられるようにする。
-# Streamlitの標準機能ではコンテナの背景色を指定できないため、CSSで塗る。
-# あわせて、1画面に詰めるため各要素の間隔を詰める。
-st.html(f"""
-<style>
-  .st-key-calc_block, .st-key-solver_block, .st-key-detail_calc {{
-      background-color: {CALC_BG};
-      border-radius: 0.4rem;
-      padding: 0.5rem 0.8rem;
-  }}
-  .block-container {{ padding-top: 2.5rem; padding-bottom: 2rem; }}
-  div[data-testid="stMetricValue"] {{ font-size: 1.35rem; }}
-  div[data-testid="stMetricLabel"] {{ font-size: 0.78rem; }}
-  div[data-testid="stVerticalBlock"] {{ gap: 0.5rem; }}
-  h4 {{ margin-top: 0.4rem; margin-bottom: 0; }}
-</style>
-""")
+compact_css()
 
 RAW_COLS = """
     id, excel_row, name, name_raw, address, structure, reply_date, zoning,
@@ -387,6 +370,35 @@ def render_edit_form():
         st.caption(f"元Excelの物件名：{prop['name_raw']}")
 
 
+def render_interactions():
+    """この物件について誰と何を話したか（銀行打診・ヒアリング）を出す。"""
+    hist = query("""
+        select case i.kind when 'bank_inquiry' then '銀行打診'
+                           when 'sales_contact' then '売買仲介'
+                           when 'rental_hearing' then '賃貸ヒアリング'
+                           else i.kind end as 種別,
+               c.name as 会社, o.branch_name as 拠点,
+               i.occurred_on as 日付,
+               ip.loanable_amount as 融資可能額,
+               coalesce(ip.result, i.content) as 内容
+        from re_interaction_properties ip
+        join re_interactions i on i.id = ip.interaction_id
+        join re_offices o on o.id = i.office_id
+        join re_companies c on c.id = o.company_id
+        where ip.property_id = :pid
+        order by i.kind, i.occurred_on desc nulls last
+    """, {"pid": str(prop["id"])})
+
+    if hist.empty:
+        st.caption("この物件についての打診・ヒアリングの記録はまだありません。")
+    else:
+        st.dataframe(hist, width="stretch", hide_index=True,
+                    column_config={
+                        "融資可能額": st.column_config.NumberColumn(format="%.0f 万円"),
+                        "内容": st.column_config.TextColumn(width="large"),
+                    })
+
+
 def render_versions():
     st.caption("同じ物件の前提違い・時点違いを横に並べています。")
     cmp = query("""
@@ -412,13 +424,18 @@ def render_versions():
 
 # ── 描画 ────────────────────────────────────────────────────
 # 版が1つだけならタブを出さず、まるごと1画面にする。
+def render_main():
+    render_simulation()
+    st.markdown("#### この物件について話したこと")
+    render_interactions()
+    render_edit_form()
+
+
 if len(versions) > 1:
     main_tab, ver_tab = st.tabs(["この版", "版の比較"])
     with main_tab:
-        render_simulation()
-        render_edit_form()
+        render_main()
     with ver_tab:
         render_versions()
 else:
-    render_simulation()
-    render_edit_form()
+    render_main()
