@@ -1,0 +1,21 @@
+# 見た目の設定。解説書PDFの配色に合わせてある。
+[theme]
+base                     = "light"
+primaryColor             = "#1F3864"   # 濃紺。ボタン・選択中の色
+backgroundColor          = "#FFFFFF"
+secondaryBackgroundColor = "#F2F4F7"   # サイドバー・入力欄の背景
+textColor                = "#222222"
+borderColor              = "#C9D2E0"
+baseRadius               = "0.4rem"
+baseFontSize             = 15
+
+# 投資判断の色。◎○ は緑、△ は黄、× は赤で出したい
+greenColor  = "#2E9E5B"
+yellowColor = "#D9A404"
+redColor    = "#C0392B"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

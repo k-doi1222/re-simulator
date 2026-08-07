@@ -1,0 +1,7 @@
+# Streamlit Community Cloud はこのファイルを見て依存パッケージを入れる。
+# 手元では uv（pyproject.toml / uv.lock）を使うので、両方を同じ内容に保つこと。
+altair>=6.2.2
+pandas>=3.0.5
+psycopg[binary]>=3.3.4
+sqlalchemy>=2.0.51
+streamlit>=1.61.1
