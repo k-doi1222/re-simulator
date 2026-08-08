@@ -9,7 +9,7 @@ import streamlit as st
 
 from auth import require_password
 from db import query
-from theme import compact_css
+from theme import compact_css, count, ratio
 
 require_password()
 compact_css()
@@ -101,11 +101,12 @@ shown = src[src["紹介数"] >= min_n]
 st.caption(f"{len(shown):,} 社（紹介数 {min_n} 件以上）")
 st.dataframe(shown, width="stretch", hide_index=True,
             column_config={
-                "紹介数": st.column_config.NumberColumn(format="%d"),
-                "検討値": st.column_config.NumberColumn("うち◎○△", format="%d"),
+                "紹介数": count("紹介数"),
+                "検討値": count("うち◎○△"),
                 "当たり率": st.column_config.ProgressColumn(format="percent",
                                                             min_value=0, max_value=1),
                 "平均満室利回": st.column_config.NumberColumn(format="%.2f%%"),
+                "平均積算比率": st.column_config.NumberColumn(format="%.2f"),
             })
 
 # ── 構造別 ──────────────────────────────────────────────────
@@ -121,9 +122,9 @@ byst = query("""
 """)
 st.dataframe(byst, width="stretch", hide_index=True,
             column_config={
-                "件数": st.column_config.NumberColumn(format="%d"),
-                "検討値": st.column_config.NumberColumn("うち◎○△", format="%d"),
-                "耐用年数": st.column_config.NumberColumn(format="%d 年"),
+                "件数": count("件数"),
+                "検討値": count("うち◎○△"),
+                "耐用年数": count("耐用年数", " 年"),
                 "平均満室利回": st.column_config.NumberColumn(format="%.2f%%"),
                 "平均築年数": st.column_config.NumberColumn(format="%.1f 年"),
             })

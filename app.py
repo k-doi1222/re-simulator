@@ -16,7 +16,8 @@ pg = st.navigation({
     ],
     "取引先": [
         st.Page("pages/banks.py", title="銀行", icon=":material/account_balance:"),
-        st.Page("pages/brokers.py", title="仲介業者", icon=":material/handshake:"),
+        st.Page("pages/sales_brokers.py", title="売買仲介", icon=":material/handshake:"),
+        st.Page("pages/rental_agencies.py", title="賃貸仲介", icon=":material/key:"),
     ],
     "振り返り": [
         st.Page("pages/analytics.py", title="分析", icon=":material/insights:"),

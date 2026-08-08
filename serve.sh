@@ -22,12 +22,15 @@ case "${1:-status}" in
   start)
     if is_up; then echo "すでに起動しています → http://localhost:$PORT"; exit 0; fi
     cd "$APP_DIR" || exit 1
-    nohup uv run streamlit run app.py \
+    # uv 経由だと依存解決が走って更に遅くなるので、venv の python を直接呼ぶ。
+    # OneDrive 上のフォルダなので、同期中は import に数分かかることがある。
+    nohup "$APP_DIR/.venv/bin/python" -m streamlit run app.py \
           --server.port "$PORT" --server.headless true \
           > "$LOG" 2>&1 &
     echo $! > "$PID_FILE"
     disown
-    for _ in $(seq 1 30); do is_up && break; sleep 1; done
+    echo "起動中…（OneDrive同期中は数分かかることがあります）"
+    for _ in $(seq 1 60); do is_up && break; sleep 5; done
     if is_up; then
       echo "起動しました → http://localhost:$PORT"
     else
