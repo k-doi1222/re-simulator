@@ -29,13 +29,11 @@ case "${1:-status}" in
           > "$LOG" 2>&1 &
     echo $! > "$PID_FILE"
     disown
-    echo "起動中…（OneDrive同期中は数分かかることがあります）"
-    for _ in $(seq 1 60); do is_up && break; sleep 5; done
-    if is_up; then
-      echo "起動しました → http://localhost:$PORT"
-    else
-      echo "起動に失敗しました。ログ: $LOG"; tail -20 "$LOG"; exit 1
-    fi
+    # ここで起動完了を待たないこと。待つとこのスクリプトを呼んだシェルが居座り、
+    # Claude Code のセッションが「作業中」の表示のままになってしまう。
+    # 立ち上がったかは `./serve.sh status` で確認する。
+    echo "起動を指示しました → http://localhost:$PORT"
+    echo "（OneDrive同期中は立ち上がるまで数分かかります。'./serve.sh status' で確認）"
     ;;
   stop)
     pkill -f "streamlit run app.py" 2>/dev/null
