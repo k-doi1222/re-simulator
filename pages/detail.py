@@ -206,7 +206,13 @@ def render_summary():
 
     # 主役（判定・価格・築年数・積算比率）は同じ大きさで左に、
     # 目安の到達価格は右に控えめに置く。見た目を揃えるため主役も card() で描く。
-    c = st.columns([1.0, 1.4, 0.9, 1.1, 1.0, 1.8, 1.8])
+    # 入居状況は元Excelと同じ「入居数/総戸数」の表記にする。片方だけでも分かるように出す。
+    occ, total = num(prop["occupied_units"]), num(prop["total_units"])
+    o = f"{occ:.0f}" if occ is not None else "—"
+    t = f"{total:.0f}" if total is not None else "—"
+    occ_text = "—" if o == "—" and t == "—" else f"{o}/{t}"
+
+    c = st.columns([1.0, 1.35, 0.85, 1.0, 0.9, 0.95, 1.65, 1.65])
     with c[0]:
         card("CF基準", row["c_bu"] or "—")
     with c[1]:
@@ -216,10 +222,12 @@ def render_summary():
     with c[3]:
         card("満室利回", f"{row['c_bq'] * 100:.2f}%" if pd.notna(row["c_bq"]) else "—")
     with c[4]:
-        card("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
+        card("入居状況", occ_text)
     with c[5]:
-        target_card("△150 にする指値後価格", num(prop["target150"]))
+        card("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
     with c[6]:
+        target_card("△150 にする指値後価格", num(prop["target150"]))
+    with c[7]:
         target_card("○200 にする指値後価格", num(prop["target200"]))
 
     st.caption(f"到達価格は販売価格を基準に算出　／　"

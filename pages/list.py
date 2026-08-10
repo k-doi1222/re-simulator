@@ -41,14 +41,16 @@ with c4:
     kw = st.text_input("物件名・所在地・メモで検索", placeholder="例：ビバリーヒルズ / 美濃加茂")
 
 all_df = query("""
-    select "状況", "行の色", "物件グループ", id,
-           "版", "版数", "最新版", "元excel行",
-           "返信日付", "物件名", "所在地", "cf基準", "到達150", "到達200",
-           "築年数", "販売価格", "指値後価格", "積算比率", "メモ", "仲介業者コメント",
-           "構造", "満室利回", "実質cf", "紹介元会社"
-    from re_properties_v
-    where (not :latest_only or "最新版")
-    order by "実質cf" desc nulls last
+    select v."状況", v."行の色", v."物件グループ", v.id,
+           v."版", v."版数", v."最新版", v."元excel行",
+           v."返信日付", v."物件名", v."所在地", v."cf基準", v."到達150", v."到達200",
+           v."築年数", v."販売価格", v."指値後価格", v."積算比率",
+           v."メモ", v."仲介業者コメント", v."構造", v."満室利回", v."実質cf", v."紹介元会社",
+           p.occupied_units, p.total_units
+    from re_properties_v v
+    join re_properties p on p.id = v.id
+    where (not :latest_only or v."最新版")
+    order by v."実質cf" desc nulls last
 """, {"latest_only": latest_only})
 
 df = all_df
@@ -71,6 +73,17 @@ view["メモ・コメント"] = (view["メモ"].fillna("") + "  "
                          + view["仲介業者コメント"].fillna("")).str.strip()
 
 
+def occupancy(occ, total):
+    """元Excelと同じ「入居数/総戸数」の表記にする。片方しかない場合も分かるように出す。"""
+    o = f"{occ:.0f}" if pd.notna(occ) else "—"
+    t = f"{total:.0f}" if pd.notna(total) else "—"
+    return "" if o == "—" and t == "—" else f"{o}/{t}"
+
+
+view["入居状況"] = [occupancy(o, t)
+                   for o, t in zip(view["occupied_units"], view["total_units"])]
+
+
 def one_line(s):
     """表に出す文字列から改行・タブを取り除く。
 
@@ -87,7 +100,7 @@ for col in ["物件名", "所在地", "メモ・コメント", "状況", "cf基�
     view[col] = one_line(view[col])
 
 COLS = ["状況", "返信日付", "物件名", "所在地", "cf基準", "到達150", "到達200",
-        "築年数", "価格", "積算比率", "メモ・コメント"]
+        "築年数", "価格", "入居状況", "積算比率", "メモ・コメント"]
 
 filtered = len(df) < len(all_df)
 count_text = (f"{len(df):,} 件（全 {len(all_df):,} 件中）" if filtered else f"{len(df):,} 件")
@@ -123,6 +136,8 @@ with st.container(key="fulltable"):
                                help="判定を○200に乗せるための指値後価格（基準は販売価格）"),
             "築年数":     count("築年数", " 年"),
             "価格":       money("価格", help="指値後価格。未入力なら販売価格"),
+            "入居状況":   st.column_config.TextColumn("入居状況", width="small",
+                                                      help="入居数 / 総戸数"),
             "積算比率":   ratio("積算比率"),
             "メモ・コメント": longtext("メモ・コメント"),
         },
