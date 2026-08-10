@@ -73,9 +73,10 @@ if kw:
 view = df.copy()
 # 価格は「指値後（入力があればそれ、なければ販売価格）」を1列で見せる
 view["価格"] = view["指値後価格"].fillna(view["販売価格"])
-# メモと業者コメントは1列にまとめる
-view["メモ・コメント"] = (view["メモ"].fillna("") + "  "
-                         + view["仲介業者コメント"].fillna("")).str.strip()
+# メモと仲介業者コメントは別の列で見せる。**改行はそのまま残す**
+# （セルを開いたときに元Excelどおりの箇条書きで読めるようにするため）
+for col in ["メモ", "仲介業者コメント"]:
+    view[col] = view[col].fillna("").astype(str)
 
 
 def occupancy(occ, total):
@@ -93,8 +94,8 @@ view["満室利回り"] = view["満室利回"] * 100
 def one_line(s):
     """表に出す文字列から改行・タブを取り除く。
 
-    物件名やメモには改行が入っているものがあり（例：'イクス\\n(レントロール引き直し版)'）、
-    そのまま表に渡すと行の描画が崩れて真っ黒な行が現れる。
+    物件名には改行が入っているものがある（例：'イクス\\n(レントロール引き直し版)'）。
+    短くて1行で読みたい列だけに使う。メモのように読ませたい文章には使わない。
     """
     return (s.fillna("").astype(str)
              .str.replace(r"[\r\n\t]+", " ", regex=True)
@@ -102,14 +103,14 @@ def one_line(s):
              .str.strip())
 
 
-for col in ["物件名", "所在地", "メモ・コメント", "状況", "cf基準"]:
+for col in ["物件名", "所在地", "状況", "cf基準"]:
     view[col] = one_line(view[col])
 
 # 判定（CF基準）のすぐ右に、その判定を左右する値（築年数・価格・利回り）を並べる。
 # 目標到達価格は目安なのでその後ろ。
 COLS = ["状況", "登録日付", "物件名", "所在地", "cf基準",
         "築年数", "価格", "満室利回り", "到達150", "到達200",
-        "入居状況", "積算比率", "メモ・コメント"]
+        "入居状況", "積算比率", "メモ", "仲介業者コメント"]
 
 filtered = len(df) < len(all_df)
 count_text = (f"{len(df):,} 件（全 {len(all_df):,} 件中）" if filtered else f"{len(df):,} 件")
@@ -138,9 +139,11 @@ with st.container(key="fulltable"):
         selection_mode="single-row",
         key="property_table",
         column_config={
-            "状況":       st.column_config.TextColumn("状況", width="small"),
-            "登録日付":   st.column_config.DateColumn("登録日付", format="YYYY-MM-DD"),
-            "物件名":     st.column_config.TextColumn("物件名", width="medium"),
+            # 物件名までは横スクロールしても左に残す（どの物件の行か見失わないように）
+            "状況":       st.column_config.TextColumn("状況", width="small", pinned=True),
+            "登録日付":   st.column_config.DateColumn("登録日付", format="YYYY-MM-DD",
+                                                      pinned=True),
+            "物件名":     st.column_config.TextColumn("物件名", width="medium", pinned=True),
             "所在地":     st.column_config.TextColumn("所在地", width="medium"),
             "cf基準":     st.column_config.TextColumn("CF基準", width="small"),
             # 見出しは短くして幅を稼ぐ。意味はツールチップに残す
@@ -155,7 +158,10 @@ with st.container(key="fulltable"):
             "入居状況":   st.column_config.TextColumn("入居状況", width="small",
                                                       help="入居数 / 総戸数"),
             "積算比率":   ratio("積算比率"),
-            "メモ・コメント": longtext("メモ・コメント"),
+            "メモ":       longtext("メモ", help="自分のメモ。セルを開くと改行のまま読めます"),
+            "仲介業者コメント": longtext("仲介業者コメント",
+                                        help="仲介業者からのコメント。"
+                                             "セルを開くと改行のまま読めます"),
         },
     )
 
