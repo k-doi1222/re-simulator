@@ -16,7 +16,7 @@ import pandas as pd
 import streamlit as st
 
 from db import execute, query
-from nav import goto_property, take_office_edit
+from nav import clear_selection, goto_property, take_office_edit
 from theme import count, money
 
 # DBの kind → 画面の言葉
@@ -639,4 +639,5 @@ def _properties_block(company_kind: str, office_id: str) -> None:
                                     "販売価格": money("販売価格")})
     rows = ev.selection.rows
     if rows:
+        clear_selection(f"rel_{office_id}")
         goto_property(rel.iloc[rows[0]]["id"])

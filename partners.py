@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from db import query
-from nav import goto_property
+from nav import clear_selection, goto_property
 from office_card import request_office
 from theme import count, longtext
 
@@ -95,6 +95,7 @@ def render_offices(kind: str, *, show_referrals: bool) -> None:
     rows = ev.selection.rows
     if rows:
         request_office(kind, shown.iloc[rows[0]]["office_id"])
+        clear_selection(f"offices_{kind}")   # 消さないと同じ行を選び続けて再描画が止まらない
         st.rerun()
 
 
@@ -150,6 +151,7 @@ def render_history(kinds: list[str], company_kind: str, *, hint: str) -> None:
     if rows:
         pid = sh.iloc[rows[0]]["property_id"]
         if pid:
+            clear_selection(f"hist_{company_kind}")
             goto_property(pid)
         else:
             st.info("この記録には物件が紐づいていません。")

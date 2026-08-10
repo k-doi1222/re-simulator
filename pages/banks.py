@@ -11,7 +11,7 @@ import streamlit as st
 
 from auth import require_password
 from db import query, refresh_calc_cache
-from nav import goto_property, render_back_to_property
+from nav import clear_selection, goto_property, render_back_to_property
 from office_card import (render_office_card, render_office_picker,
                          request_office)
 from partners import render_persons
@@ -95,6 +95,7 @@ with st.expander("支店を探す（303支店から絞り込む）"):
     rows = ev.selection.rows
     if rows:
         request_office("bank", df.iloc[rows[0]]["office_id"])
+        clear_selection("bank_list")   # 消さないと同じ行を選び続けて再描画が止まらない
         st.rerun()
 
 with st.expander("打診の結果を横断で見る"):
@@ -129,6 +130,7 @@ with st.expander("打診の結果を横断で見る"):
     if rows:
         pid = shown.iloc[rows[0]]["property_id"]
         if pid:
+            clear_selection("bank_results")
             goto_property(pid)
 
     st.info("支店は原文に銀行名しか書かれていなかったため、銀行ごとに接触実績が"

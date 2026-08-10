@@ -8,10 +8,21 @@ import streamlit as st
 PROPERTY_PAGE = "pages/detail.py"
 
 
+def clear_selection(*keys: str) -> None:
+    """表の選択状態を捨てる。
+
+    `st.dataframe(on_select="rerun")` の選択はウィジェットのキーに残る。
+    「行を選んだら動く」処理では、消さないと**次の描画でも同じ行が選ばれたまま**になり、
+    同じ処理が延々と再発火する（実際に画面が読み込み続ける状態になった）。
+    """
+    for k in keys:
+        st.session_state.pop(k, None)
+
+
 def goto_property(property_id: str) -> None:
     """物件詳細へ移動する。一覧側の選択状態は捨てて、戻ったときに再発火しないようにする。"""
     st.session_state["selected_id"] = str(property_id)
-    st.session_state.pop("property_table", None)
+    clear_selection("property_table")
     st.switch_page(PROPERTY_PAGE)
 
 
@@ -33,6 +44,8 @@ def goto_office_edit(office_id: str, company_kind: str,
     st.session_state["edit_office_kind"] = company_kind
     st.session_state["edit_office_back"] = (str(back_property_id)
                                             if back_property_id else None)
+    # 戻ってきたときに同じ行が選ばれたままだと、また飛んでしまう
+    clear_selection(*[k for k in st.session_state if str(k).startswith("hist_")])
     st.switch_page(OFFICE_PAGE[company_kind])
 
 
