@@ -43,7 +43,9 @@ def compact_css(table_vh: str = TABLE_VH) -> None:
       /* 目安として出す値は控えめに。主役（判定・価格・築年数・積算比率）を立たせる。 */
       .tp-lab-sub {{ font-size: 0.72rem; color: #999; }}
       .tp-val-sub {{ font-size: 1.0rem; font-weight: 500; line-height: 1.5; color: #555; }}
-      .tp-pills {{ display: flex; gap: 0.3rem; flex-wrap: wrap; margin-top: 0.15rem; }}
+      /* タグがない項目でも高さが揃うよう、空でも最低限の高さを確保する */
+      .tp-pills {{ display: flex; gap: 0.3rem; flex-wrap: wrap; margin-top: 0.15rem;
+                   min-height: 1.25rem; }}
       .tp-pill {{
           background: rgba(128,128,128,0.15);
           border-radius: 999px;

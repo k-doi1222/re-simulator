@@ -204,19 +204,23 @@ def render_summary():
             card(label, f"{price:,.0f} 万円",
                  [discount_pill(price), f"▲{off:,.0f} 万円"], sub=True)
 
-    # 主役（判定・価格・築年数・積算比率）を左に、目安の到達価格は右に控えめに置く
+    # 主役（判定・価格・築年数・積算比率）は同じ大きさで左に、
+    # 目安の到達価格は右に控えめに置く。見た目を揃えるため主役も card() で描く。
     c = st.columns([1.1, 1.5, 1.0, 1.1, 1.9, 1.9])
-    c[0].metric("CF基準", row["c_bu"] or "—")
+    with c[0]:
+        card("CF基準", row["c_bu"] or "—")
     with c[1]:
         card("価格（指値後）", f"{ar:,.0f} 万円", [discount_pill(ar)])
-    c[2].metric("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
-    c[3].metric("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
+    with c[2]:
+        card("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
+    with c[3]:
+        card("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
     with c[4]:
-        target_card("△150 にする指値後価格（目安）", num(prop["target150"]))
+        target_card("△150 にする指値後価格", num(prop["target150"]))
     with c[5]:
-        target_card("○200 にする指値後価格（目安）", num(prop["target200"]))
+        target_card("○200 にする指値後価格", num(prop["target200"]))
 
-    st.caption(f"到達価格は販売価格を基準に算出した目安　／　"
+    st.caption(f"到達価格は販売価格を基準に算出　／　"
               f"構造 {txt(prop['structure']) or '未設定'}・法定耐用年数 {prop['useful_life']:.0f}年"
               f"　／　元Excel {prop['excel_row']}行目")
     return ar, row
