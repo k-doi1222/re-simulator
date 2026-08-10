@@ -9,7 +9,6 @@ PMT・税金などの計算式そのものはすべてSQL側の re_calc_property
 2点だけ実際に評価してもらい、そこから「判定値150/200に乗る価格」を代数で解く。
 """
 import datetime
-import math
 
 import pandas as pd
 import streamlit as st
@@ -22,7 +21,7 @@ require_password()  # サイドバー経由の直接遷移で認証をすり抜�
 compact_css()
 
 RAW_COLS = """
-    id, excel_row, name, name_raw, address, structure, reply_date, zoning,
+    id, excel_row, name, name_raw, address, structure, reply_date, zoning, status,
     memo, input_memo, broker_comment, bank_inquiry_result,
     contact_method, inquiry_channel,
     purchase_price, negotiated_price, land_area, road_price_actual, zone_coef, shape_coef,
@@ -30,7 +29,9 @@ RAW_COLS = """
     occupied_units, total_units, parking_spaces, external_parking,
     has_elevator, has_septic_tank, free_internet, hazard,
     legal_useful_life, bank_offered_rate, scenario_label,
-    coalesce(legal_useful_life, re_useful_life_by_structure(structure)) as useful_life
+    coalesce(legal_useful_life, re_useful_life_by_structure(structure)) as useful_life,
+    re_target_price(id, 150) as target150,
+    re_target_price(id, 200) as target200
 """
 
 # 計算関数に渡す入力値。どちらのSQLでも同じ列名で使う。
@@ -46,33 +47,8 @@ LIVE_SQL = """
     )
 """
 
-# 2点だけ評価してソルバーの係数を出す版。他の入力は固定してARだけ2通り試す。
-# 注意：SQLAlchemyの text() は「:param::型」(バインド直後にキャスト)を誤解釈してSQL構文エラーになる。
-# cast(:param as 型) の書き方で回避する。
-SAMPLES_SQL = """
-    with p as (
-      select cast(:purchase_price as float8) as purchase_price,
-             cast(:land_area as float8) as land_area,
-             cast(:road_price_actual as float8) as road_price_actual,
-             cast(:zone_coef as float8) as zone_coef,
-             cast(:shape_coef as float8) as shape_coef,
-             cast(:floor_area as float8) as floor_area,
-             cast(:built_date as date) as built_date,
-             cast(:full_income as float8) as full_income,
-             cast(:current_income as float8) as current_income,
-             cast(:extra_cost as float8) as extra_cost,
-             cast(:property_tax as float8) as property_tax,
-             cast(:useful_life as float8) as useful_life
-    ),
-    t(ar_test) as (values (cast(:ar1 as float8)), (cast(:ar2 as float8)))
-    select t.ar_test, c.c_bt
-    from p, t
-    cross join lateral re_calc_property_analysis(
-      p.purchase_price, t.ar_test, p.land_area, p.road_price_actual, p.zone_coef, p.shape_coef,
-      p.floor_area, p.built_date, p.full_income, p.current_income, p.extra_cost, p.property_tax,
-      p.useful_life, 0.015, 0.09, 0.2, 0.04, 19, current_date, 1, null
-    ) c
-"""
+# 目標判定に乗せる価格の逆算は、一覧と詳細で同じ結果になるよう
+# DB側の re_target_price(物件ID, 目標値) に寄せた（RAW_COLS で取得している）。
 
 UPDATE_SQL = """
     update re_properties set
@@ -166,78 +142,88 @@ if len(versions) > 1:
 else:
     prop = versions.iloc[0]
 
-st.markdown(f"### {prop['name'] or '（物件名なし）'}")
-st.caption(f"{txt(prop['address']) or '所在地不明'}　／　元Excel {prop['excel_row']}行目"
-           f"　／　構造 {txt(prop['structure']) or '未設定'}"
-           f"　／　法定耐用年数 {prop['useful_life']:.0f}年（構造から自動）")
-
-
-def render_simulation():
-    """指値スライダー・判定・ソルバーを描く。"""
-    if num(prop["purchase_price"]) in (None, 0):
-        st.warning("販売価格が未入力のため、シミュレーションできません。下のフォームで入力してください。")
-        return
-
+def render_summary():
+    """この物件の要点。ぱっと目に入るよう、上部に太字でまとめて置く。"""
     purchase_price = num(prop["purchase_price"])
-    default_ar = num(prop["negotiated_price"]) or purchase_price
-    lo = round(purchase_price * 0.5, -1)   # 値引き率50%までで十分
-    hi = round(purchase_price * 1.05, -1)
 
-    sl, btn = st.columns([5, 1], vertical_alignment="bottom")
-    with sl:
-        ar = st.slider(f"指値後価格（万円）　販売価格 {purchase_price:,.0f} 万円",
-                       min_value=lo, max_value=hi,
-                       value=min(max(default_ar, lo), hi), step=10.0,
-                       key=f"ar_slider_{prop['id']}")
-    with btn:
-        if st.button("価格を保存", type="primary", width="stretch"):
+    # ── 指値後価格（入力値。ここだけ直接変えられる）────────
+    top = st.columns([2, 1, 5])
+    with top[0]:
+        ar = st.number_input(
+            "指値後価格（万円）",
+            value=float(num(prop["negotiated_price"]) or purchase_price or 0),
+            step=10.0, key=f"ar_{prop['id']}")
+    with top[1]:
+        st.write("")  # ラベル分の高さを合わせる
+        if st.button("保存", type="primary", width="stretch"):
             execute("update re_properties set negotiated_price = :ar, updated_at = now() "
                     "where id = :id", {"ar": ar, "id": str(prop["id"])})
             st.success("保存しました")
             st.rerun()
 
+    if not purchase_price:
+        st.warning("販売価格が未入力のため、判定を計算できません。下のフォームで入力してください。")
+        return None, None
+
     calc_in = {c: num(prop[c]) if c != "built_date" else day(prop[c]) for c in INPUT_COLS}
     row = query(LIVE_SQL, {**calc_in, "ar": ar}).iloc[0]
 
-    left, right = st.columns([3, 2])
-    with left:
-        st.caption(f"この価格での判定（値引き率 {(1 - ar / purchase_price) * 100:.1f}%）")
-        with st.container(key="calc_block"):
-            m = st.columns(4)
-            m[0].metric("実質CF", f"{row['c_bt']:,.0f} 万円" if pd.notna(row["c_bt"]) else "—")
-            m[1].metric("判定", row["c_bu"] or "—")
-            m[2].metric("積算比率",
-                        f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
-            m[3].metric("満室利回",
-                        f"{row['c_bq'] * 100:.2f}%" if pd.notna(row["c_bq"]) else "—")
+    def b(label, value):
+        """ラベルと値を、本文と同じ文字サイズの太字で出す。"""
+        st.markdown(f"<div style='font-size:0.78rem;color:#666'>{label}</div>"
+                    f"<div style='font-weight:700'>{value}</div>", unsafe_allow_html=True)
 
-    with right:
-        st.caption("目標の判定に乗せる指値後価格")
-        samples = query(SAMPLES_SQL, {**calc_in, "ar1": purchase_price,
-                                      "ar2": purchase_price * 0.5})
-        ar1, bt1 = samples.iloc[0]["ar_test"], samples.iloc[0]["c_bt"]
-        ar2, bt2 = samples.iloc[1]["ar_test"], samples.iloc[1]["c_bt"]
-        with st.container(key="solver_block"):
-            cols = st.columns(2)
-            if pd.notna(bt1) and pd.notna(bt2) and ar1 != ar2:
-                k = (bt1 - bt2) / (ar2 - ar1)
-                C = bt1 + k * ar1
-                for col, mark, target in zip(cols, ["△", "○"], [150, 200]):
-                    denom = target + 10000 * k
-                    raw = 10000 * C / denom if denom else math.nan
-                    # 判定値の表示はSQL側でfloor()するため、境界ちょうどだと丸め誤差で
-                    # 1つ下に落ちることがある。10万円単位で切り下げて安全側に倒す。
-                    price = math.floor(raw / 10) * 10 if math.isfinite(raw) else math.nan
-                    with col:
-                        if not math.isfinite(price) or price <= 0:
-                            st.metric(f"{mark}{target}", "不可")
-                        elif price >= purchase_price:
-                            st.metric(f"{mark}{target}", "現価格で到達")
-                        else:
-                            st.metric(f"{mark}{target}", f"{price:,.0f}",
-                                      f"{(1 - price / purchase_price) * 100:.1f}% 指値")
-            else:
-                st.caption("満室年収などの入力が不足しており、逆算できません。")
+    # ── 1段目：返信日付・物件名・所在地・CF基準 ───────────
+    c = st.columns([1.2, 2.4, 2.8, 1.2])
+    with c[0]:
+        b("返信日付", str(prop["reply_date"]) if prop["reply_date"] else "—")
+    with c[1]:
+        b("物件名", prop["name"] or "（物件名なし）")
+    with c[2]:
+        b("所在地", txt(prop["address"]) or "—")
+    with c[3]:
+        b("CF基準", row["c_bu"] or "—")
+
+    # ── 2段目：目標到達価格・築年数・価格・積算比率 ────────
+    t150, t200 = num(prop["target150"]), num(prop["target200"])
+
+    def target_text(price):
+        if price is None or price <= 0:
+            return "到達不可"
+        if price >= purchase_price:
+            return f"{purchase_price:,.0f} 万円（現価格で到達）"
+        off = purchase_price - price
+        return f"{price:,.0f} 万円（▲{off:,.0f} 万円・{off / purchase_price * 100:.1f}%）"
+
+    c = st.columns([2.2, 2.2, 1.0, 1.4, 1.2])
+    with c[0]:
+        b("△150にする指値後価格", target_text(t150))
+    with c[1]:
+        b("○200にする指値後価格", target_text(t200))
+    with c[2]:
+        b("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
+    with c[3]:
+        b("価格（指値後）", f"{ar:,.0f} 万円")
+    with c[4]:
+        b("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
+
+    st.caption(f"販売価格 {purchase_price:,.0f} 万円　／　"
+              f"現在の値引き率 {(1 - ar / purchase_price) * 100:.1f}%　／　"
+              f"到達価格は販売価格を基準に算出　／　"
+              f"構造 {txt(prop['structure']) or '未設定'}・法定耐用年数 {prop['useful_life']:.0f}年")
+    return ar, row
+
+
+def render_calc_detail(ar, row):
+    """判定まわりの計算値。要点に入りきらないものはここに畳んでおく。"""
+    if row is None:
+        return
+    with st.container(key="calc_block"):
+        m = st.columns(4)
+        m[0].metric("実質CF", f"{row['c_bt']:,.0f} 万円" if pd.notna(row["c_bt"]) else "—")
+        m[1].metric("CF基準", row["c_bu"] or "—")
+        m[2].metric("積算評価", f"{row['c_bo']:,.0f} 万円" if pd.notna(row["c_bo"]) else "—")
+        m[3].metric("満室利回", f"{row['c_bq'] * 100:.2f}%" if pd.notna(row["c_bq"]) else "—")
 
     with st.expander("その他の計算値"):
         with st.container(key="detail_calc"):
@@ -260,6 +246,24 @@ def render_simulation():
 def render_memo():
     """メモ・所感・業者コメント。話したことより上に置く。"""
     st.markdown("#### メモ・コメント")
+
+    # 検討状況（元Excelの行の塗りつぶしに相当）。色づけの根拠はメモに書く運用なので隣に置く。
+    sts = query("select status, description from re_property_statuses order by sort_order")
+    opts = sts["status"].tolist()
+    cur = txt(prop["status"]) if txt(prop["status"]) in opts else opts[0]
+    c = st.columns([2, 1, 5])
+    with c[0]:
+        new_st = st.selectbox("検討状況", opts, index=opts.index(cur),
+                              key=f"status_{prop['id']}",
+                              help="　".join(f"{r.status}＝{r.description}"
+                                             for _, r in sts.iterrows()))
+    with c[1]:
+        st.write("")
+        if st.button("状況を保存", width="stretch", disabled=(new_st == cur)):
+            execute("update re_properties set status = :s, updated_at = now() where id = :id",
+                    {"s": new_st, "id": str(prop["id"])})
+            st.rerun()
+
     with st.form(key=f"memo_{prop['id']}"):
         c = st.columns(2)
         m_memo = c[0].text_area("メモ・所感・疑問", txt(prop["memo"]), height=150)
@@ -457,9 +461,10 @@ def render_versions():
 
 # ── 描画 ────────────────────────────────────────────────────
 def render_main():
-    render_simulation()
+    ar, row = render_summary()
     render_memo()
     render_interactions()
+    render_calc_detail(ar, row)
     render_edit_form()
 
 
