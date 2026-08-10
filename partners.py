@@ -4,6 +4,8 @@ DBでは銀行も売買仲介も賃貸仲介も同じ re_companies / re_offices 
 `kinds` 配列で種別を持たせている（1社が売買と賃貸を兼ねる実データがあるため）。
 一方で見る側は種別ごとに分けたいので、画面はこの部品を kind 違いで呼び分ける。
 """
+import uuid
+
 import pandas as pd
 import streamlit as st
 
@@ -165,6 +167,10 @@ def render_persons(company_kind: str) -> None:
         order by c.name, o.branch_name, pe.name
     """, {"ckind": company_kind})
 
+    # 値のない欄は空欄で見せる（そのまま渡すと Streamlit が "None" と描く）
+    for col in ["氏名", "かな", "役職", "会社", "拠点", "電話", "メール", "後任"]:
+        ppl[col] = ppl[col].fillna("").astype(str)
+
     c = st.columns([2, 4])
     only_cur = c[0].toggle("現任のみ", value=True, key=f"pc_{company_kind}")
     kw = c[1].text_input("氏名・会社名で検索", key=f"pk_{company_kind}")
@@ -175,6 +181,144 @@ def render_persons(company_kind: str) -> None:
     st.caption(f"{len(sh):,} 名")
     st.dataframe(sh, width="stretch", hide_index=True,
                 column_config={"接触回数": count("接触回数")})
+
+    render_person_editor(company_kind)
+
+
+def render_person_editor(company_kind: str) -> None:
+    """担当者を直す。
+
+    人を消したり名前を上書きしたりはしない。異動は
+    「前任を異動済にして、後任へ succeeded_by でつなぐ」形で残す。
+    こうしないと、前任と話した過去の接触記録が後任の記録に化けてしまう。
+    """
+    with st.expander("担当者を直す（追加・修正・異動）"):
+        offices = query("""
+            select o.id, c.name || '　' || coalesce(o.branch_name, '') as label
+            from re_offices o
+            join re_companies c on c.id = o.company_id
+            where :ckind = any(c.kinds)
+            order by c.name, o.branch_name
+        """, {"ckind": company_kind})
+        if offices.empty:
+            st.info("拠点がまだ登録されていません。")
+            return
+
+        label = st.selectbox("拠点", offices["label"].tolist(),
+                             key=f"pe_off_{company_kind}",
+                             help="入力すると絞り込めます")
+        oid = str(offices.loc[offices["label"] == label, "id"].iloc[0])
+
+        cur = query("""
+            select id, name as 氏名, name_kana as かな, role as 役職,
+                   phone as 電話, email as メール, is_current as 現任
+            from re_persons where office_id = :oid
+            order by is_current desc, name
+        """, {"oid": oid})
+        for col in ["氏名", "かな", "役職", "電話", "メール"]:
+            cur[col] = cur[col].fillna("").astype(str)
+
+        # ── いまいる人を直す ────────────────────────────────
+        st.markdown("**この拠点の担当者**")
+        if cur.empty:
+            st.caption("まだ登録がありません。下の「担当者を追加」から登録してください。")
+        else:
+            cols = ["氏名", "かな", "役職", "電話", "メール", "現任"]
+            edited = st.data_editor(
+                cur[cols], width="stretch", hide_index=True,
+                key=f"pe_ed_{company_kind}_{oid}",
+                column_config={
+                    "現任": st.column_config.CheckboxColumn(
+                        "現任", help="外すと異動済になります。過去の記録はこの人に残ります"),
+                })
+            # NaN 同士は「等しい」と見なす。素の != だと NaN != NaN が True になり、
+            # 何も触っていないのに「変更あり」と判定されてしまう。
+            def _cmp(df):
+                return df.astype(object).where(df.notna(), "")
+
+            changed = (_cmp(edited) != _cmp(cur[cols])).any(axis=1)
+            n = int(changed.sum())
+            if st.button(f"変更を保存（{n} 名）", type="primary", disabled=(n == 0),
+                         key=f"pe_save_{company_kind}"):
+                for i in edited.index[changed]:
+                    execute("""
+                        update re_persons
+                           set name = :name, name_kana = :kana, role = :role,
+                               phone = :phone, email = :email,
+                               is_current = :cur, updated_at = now()
+                         where id = :id
+                    """, {"id": str(cur.at[i, "id"]),
+                          "name": _z(edited.at[i, "氏名"]),
+                          "kana": _z(edited.at[i, "かな"]),
+                          "role": _z(edited.at[i, "役職"]),
+                          "phone": _z(edited.at[i, "電話"]),
+                          "email": _z(edited.at[i, "メール"]),
+                          "cur": bool(edited.at[i, "現任"])})
+                st.success(f"{n} 名を更新しました。")
+                st.rerun()
+
+        # ── 担当者を追加する ────────────────────────────────
+        st.markdown("**担当者を追加**")
+        with st.form(f"pe_add_{company_kind}", border=False):
+            c = st.columns([2, 2, 2, 2, 3])
+            a_name = c[0].text_input("氏名")
+            a_kana = c[1].text_input("かな")
+            a_role = c[2].text_input("役職")
+            a_tel = c[3].text_input("電話")
+            a_mail = c[4].text_input("メール")
+            if st.form_submit_button("追加する", type="primary"):
+                if not a_name.strip():
+                    st.error("氏名を入力してください。")
+                else:
+                    _insert_person(oid, a_name, a_kana, a_role, a_tel, a_mail)
+                    st.success(f"{a_name.strip()} さんを追加しました。")
+                    st.rerun()
+
+        # ── 異動として引き継ぐ ──────────────────────────────
+        live = cur[cur["現任"].fillna(True)] if not cur.empty else cur
+        if not live.empty:
+            st.markdown("**担当者が代わった（異動の引き継ぎ）**")
+            st.caption("前任を異動済にして、後任へつなぎます。"
+                      "前任と話した過去の記録は前任に残ります。")
+            with st.form(f"pe_succ_{company_kind}", border=False):
+                c = st.columns([2, 2, 2, 2, 2])
+                old = c[0].selectbox("前任", live["氏名"].tolist())
+                s_name = c[1].text_input("後任の氏名")
+                s_kana = c[2].text_input("後任のかな")
+                s_role = c[3].text_input("後任の役職")
+                s_tel = c[4].text_input("後任の電話")
+                if st.form_submit_button("引き継ぐ", type="primary"):
+                    if not s_name.strip():
+                        st.error("後任の氏名を入力してください。")
+                    else:
+                        new_id = _insert_person(oid, s_name, s_kana, s_role, s_tel, "")
+                        execute("""
+                            update re_persons
+                               set is_current = false, succeeded_by = cast(:new as uuid),
+                                   updated_at = now()
+                             where id = :old
+                        """, {"new": new_id,
+                              "old": str(live.loc[live["氏名"] == old, "id"].iloc[0])})
+                        st.success(f"{old} さん → {s_name.strip()} さんへ引き継ぎました。")
+                        st.rerun()
+
+
+def _z(v) -> str | None:
+    """空欄はNULLで保存する。空文字とNULLが混ざると検索や集計がぶれる。"""
+    s = "" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v).strip()
+    return s or None
+
+
+def _insert_person(office_id: str, name, kana, role, phone, email) -> str:
+    """担当者を1名追加してIDを返す。IDは手元で決める（INSERT…RETURNINGは
+    キャッシュ付きの query() を経由することになり、二重登録の恐れがあるため）。"""
+    new_id = str(uuid.uuid4())
+    execute("""
+        insert into re_persons (id, office_id, name, name_kana, role, phone, email)
+        values (cast(:id as uuid), cast(:oid as uuid), :name, :kana, :role, :tel, :mail)
+    """, {"id": new_id, "oid": office_id, "name": _z(name), "kana": _z(kana),
+          "role": _z(role), "tel": _z(phone), "mail": _z(email)})
+    return new_id
 
 
 def render_add_interaction(company_kind: str, kind_options: dict[str, str]) -> None:
