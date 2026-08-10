@@ -177,34 +177,46 @@ def render_summary():
     row = query(LIVE_SQL, {**calc_in, "ar": ar}).iloc[0]
 
     # ── 3段目：判定まわり ─────────────────────────────────
+    def discount_pill(price):
+        """販売価格からの下げ幅を「↓◯%」で表す。上振れなら向きを反転させる。"""
+        rate = (1 - price / purchase_price) * 100
+        arrow = "↓" if rate >= 0 else "↑"
+        return f"{arrow}{abs(rate):.1f}% 指値"
+
+    def card(label, value, pills=(), sub=False):
+        """値＋灰色タグのカード。sub=True は「目安」として控えめに出す。"""
+        lab_cls = "tp-lab-sub" if sub else "tp-lab"
+        val_cls = "tp-val-sub" if sub else "tp-val"
+        pill_cls = "tp-pill tp-pill-sub" if sub else "tp-pill"
+        ps = "".join(f'<span class="{pill_cls}">{p}</span>' for p in pills)
+        st.html(f'<div class="tp"><div class="{lab_cls}">{label}</div>'
+                f'<div class="{val_cls}">{value}</div>'
+                f'<div class="tp-pills">{ps}</div></div>')
+
     def target_card(label, price):
-        """到達価格のカード。値の下に「指値率」「指値幅」を灰色のタグで2つ並べる。"""
+        """目標判定に乗せる価格。あくまで目安なので控えめに出す。"""
         if price is None or price <= 0:
-            inner = '<div class="tp-val">到達不可</div>'
+            card(label, "到達不可", sub=True)
         elif price >= purchase_price:
-            inner = (f'<div class="tp-val">{purchase_price:,.0f} 万円</div>'
-                     f'<div class="tp-pills"><span class="tp-pill">現価格で到達</span></div>')
+            card(label, f"{purchase_price:,.0f} 万円", ["現価格で到達"], sub=True)
         else:
             off = purchase_price - price
-            inner = (f'<div class="tp-val">{price:,.0f} 万円</div>'
-                     f'<div class="tp-pills">'
-                     f'<span class="tp-pill">{off / purchase_price * 100:.1f}% 指値</span>'
-                     f'<span class="tp-pill">▲{off:,.0f} 万円</span>'
-                     f'</div>')
-        st.html(f'<div class="tp"><div class="tp-lab">{label}</div>{inner}</div>')
+            card(label, f"{price:,.0f} 万円",
+                 [discount_pill(price), f"▲{off:,.0f} 万円"], sub=True)
 
-    c = st.columns([1.2, 1.4, 2.2, 2.2, 1.0, 1.1])
+    # 主役（判定・価格・築年数・積算比率）を左に、目安の到達価格は右に控えめに置く
+    c = st.columns([1.1, 1.5, 1.0, 1.1, 1.9, 1.9])
     c[0].metric("CF基準", row["c_bu"] or "—")
-    c[1].metric("価格（指値後）", f"{ar:,.0f} 万円",
-                f"{(1 - ar / purchase_price) * 100:.1f}% 指値", delta_color="off")
-    with c[2]:
-        target_card("△150 にする指値後価格", num(prop["target150"]))
-    with c[3]:
-        target_card("○200 にする指値後価格", num(prop["target200"]))
-    c[4].metric("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
-    c[5].metric("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
+    with c[1]:
+        card("価格（指値後）", f"{ar:,.0f} 万円", [discount_pill(ar)])
+    c[2].metric("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
+    c[3].metric("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
+    with c[4]:
+        target_card("△150 にする指値後価格（目安）", num(prop["target150"]))
+    with c[5]:
+        target_card("○200 にする指値後価格（目安）", num(prop["target200"]))
 
-    st.caption(f"到達価格は販売価格を基準に算出　／　"
+    st.caption(f"到達価格は販売価格を基準に算出した目安　／　"
               f"構造 {txt(prop['structure']) or '未設定'}・法定耐用年数 {prop['useful_life']:.0f}年"
               f"　／　元Excel {prop['excel_row']}行目")
     return ar, row

@@ -40,15 +40,19 @@ def compact_css(table_vh: str = TABLE_VH) -> None:
       .tp {{ padding: 0.1rem 0 0.4rem 0; }}
       .tp-lab {{ font-size: 0.78rem; color: #666; }}
       .tp-val {{ font-size: 1.35rem; font-weight: 600; line-height: 1.5; }}
-      .tp-pills {{ display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.15rem; }}
+      /* 目安として出す値は控えめに。主役（判定・価格・築年数・積算比率）を立たせる。 */
+      .tp-lab-sub {{ font-size: 0.72rem; color: #999; }}
+      .tp-val-sub {{ font-size: 1.0rem; font-weight: 500; line-height: 1.5; color: #555; }}
+      .tp-pills {{ display: flex; gap: 0.3rem; flex-wrap: wrap; margin-top: 0.15rem; }}
       .tp-pill {{
           background: rgba(128,128,128,0.15);
           border-radius: 999px;
-          padding: 0.1rem 0.6rem;
-          font-size: 0.82rem;
+          padding: 0.1rem 0.55rem;
+          font-size: 0.78rem;
           color: #444;
           white-space: nowrap;
       }}
+      .tp-pill-sub {{ font-size: 0.72rem; color: #666; background: rgba(128,128,128,0.10); }}
     </style>
     """)
 
