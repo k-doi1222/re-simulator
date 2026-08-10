@@ -206,7 +206,7 @@ def render_summary():
 
     # 主役（判定・価格・築年数・積算比率）は同じ大きさで左に、
     # 目安の到達価格は右に控えめに置く。見た目を揃えるため主役も card() で描く。
-    c = st.columns([1.1, 1.5, 1.0, 1.1, 1.9, 1.9])
+    c = st.columns([1.0, 1.4, 0.9, 1.1, 1.0, 1.8, 1.8])
     with c[0]:
         card("CF基準", row["c_bu"] or "—")
     with c[1]:
@@ -214,10 +214,12 @@ def render_summary():
     with c[2]:
         card("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
     with c[3]:
-        card("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
+        card("満室利回", f"{row['c_bq'] * 100:.2f}%" if pd.notna(row["c_bq"]) else "—")
     with c[4]:
-        target_card("△150 にする指値後価格", num(prop["target150"]))
+        card("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
     with c[5]:
+        target_card("△150 にする指値後価格", num(prop["target150"]))
+    with c[6]:
         target_card("○200 にする指値後価格", num(prop["target200"]))
 
     st.caption(f"到達価格は販売価格を基準に算出　／　"
@@ -230,29 +232,31 @@ def render_calc_detail(ar, row):
     """判定まわりの計算値。要点に入りきらないものはここに畳んでおく。"""
     if row is None:
         return
+    # 上の要点に出しているもの（CF基準・満室利回）はここでは繰り返さない
     with st.container(key="calc_block"):
         m = st.columns(4)
         m[0].metric("実質CF", f"{row['c_bt']:,.0f} 万円" if pd.notna(row["c_bt"]) else "—")
-        m[1].metric("CF基準", row["c_bu"] or "—")
-        m[2].metric("積算評価", f"{row['c_bo']:,.0f} 万円" if pd.notna(row["c_bo"]) else "—")
-        m[3].metric("満室利回", f"{row['c_bq'] * 100:.2f}%" if pd.notna(row["c_bq"]) else "—")
+        m[1].metric("積算評価", f"{row['c_bo']:,.0f} 万円" if pd.notna(row["c_bo"]) else "—")
+        m[2].metric("現況利回", f"{row['c_br'] * 100:.2f}%" if pd.notna(row["c_br"]) else "—")
+        m[3].metric("年間返済額", f"{row['c_cd']:,.0f} 万円" if pd.notna(row["c_cd"]) else "—")
 
+    # 上に出しているもの（築年数・積算評価・現況利回・年間返済）はここでは繰り返さない
     with st.expander("その他の計算値"):
         with st.container(key="detail_calc"):
             g = st.columns(6)
-            g[0].metric("築年数", f"{row['c_bb']:.0f}年" if pd.notna(row["c_bb"]) else "—")
-            g[1].metric("融資年数", f"{row['c_by']:.0f}年" if pd.notna(row["c_by"]) else "—")
-            g[2].metric("土地評価", f"{row['c_bm']:,.0f}" if pd.notna(row["c_bm"]) else "—")
-            g[3].metric("建物評価", f"{row['c_bn']:,.0f}" if pd.notna(row["c_bn"]) else "—")
-            g[4].metric("積算評価", f"{row['c_bo']:,.0f}" if pd.notna(row["c_bo"]) else "—")
-            g[5].metric("年間返済", f"{row['c_cd']:,.0f}" if pd.notna(row["c_cd"]) else "—")
+            g[0].metric("融資年数", f"{row['c_by']:.0f} 年" if pd.notna(row["c_by"]) else "—")
+            g[1].metric("土地評価", f"{row['c_bm']:,.0f}" if pd.notna(row["c_bm"]) else "—")
+            g[2].metric("建物評価", f"{row['c_bn']:,.0f}" if pd.notna(row["c_bn"]) else "—")
+            g[3].metric("購入諸経費", f"{row['c_bw']:,.0f}" if pd.notna(row["c_bw"]) else "—")
+            g[4].metric("固都税(仮)", f"{row['c_av']:,.0f}" if pd.notna(row["c_av"]) else "—")
+            g[5].metric("7年通算損益", f"{row['c_dq']:,.0f}" if pd.notna(row["c_dq"]) else "—")
             g2 = st.columns(6)
-            g2[0].metric("現況利回", f"{row['c_br'] * 100:.2f}%" if pd.notna(row["c_br"]) else "—")
-            g2[1].metric("購入諸経費", f"{row['c_bw']:,.0f}" if pd.notna(row["c_bw"]) else "—")
-            g2[2].metric("満室時CF", f"{row['c_bs']:,.0f}" if pd.notna(row["c_bs"]) else "—")
-            g2[3].metric("現況CF", f"{row['c_bv']:,.0f}" if pd.notna(row["c_bv"]) else "—")
-            g2[4].metric("固都税(仮)", f"{row['c_av']:,.0f}" if pd.notna(row["c_av"]) else "—")
-            g2[5].metric("7年通算", f"{row['c_dq']:,.0f}" if pd.notna(row["c_dq"]) else "—")
+            g2[0].metric("満室時CF", f"{row['c_bs']:,.0f}" if pd.notna(row["c_bs"]) else "—")
+            g2[1].metric("現況CF", f"{row['c_bv']:,.0f}" if pd.notna(row["c_bv"]) else "—")
+            g2[2].metric("満室年収", f"{num(prop['full_income']) or 0:,.0f}")
+            g2[3].metric("現況年収", f"{num(prop['current_income']) or 0:,.0f}")
+            g2[4].metric("土地面積", f"{num(prop['land_area']) or 0:,.0f} ㎡")
+            g2[5].metric("延床面積", f"{num(prop['floor_area']) or 0:,.0f} ㎡")
 
 
 def render_memo():
