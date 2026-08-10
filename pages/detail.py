@@ -185,21 +185,27 @@ def render_summary():
         b("CF基準", row["c_bu"] or "—")
 
     # ── 2段目：目標到達価格・築年数・価格・積算比率 ────────
-    t150, t200 = num(prop["target150"]), num(prop["target200"])
-
-    def target_text(price):
+    def target_card(label, price):
+        """到達価格のカード。値の下に「指値率」「指値幅」を灰色のタグで2つ並べる。"""
         if price is None or price <= 0:
-            return "到達不可"
-        if price >= purchase_price:
-            return f"{purchase_price:,.0f} 万円（現価格で到達）"
-        off = purchase_price - price
-        return f"{price:,.0f} 万円（▲{off:,.0f} 万円・{off / purchase_price * 100:.1f}%）"
+            inner = '<div class="tp-val">到達不可</div>'
+        elif price >= purchase_price:
+            inner = (f'<div class="tp-val">{purchase_price:,.0f} 万円</div>'
+                     f'<div class="tp-pills"><span class="tp-pill">現価格で到達</span></div>')
+        else:
+            off = purchase_price - price
+            inner = (f'<div class="tp-val">{price:,.0f} 万円</div>'
+                     f'<div class="tp-pills">'
+                     f'<span class="tp-pill">{off / purchase_price * 100:.1f}% 指値</span>'
+                     f'<span class="tp-pill">▲{off:,.0f} 万円</span>'
+                     f'</div>')
+        st.html(f'<div class="tp"><div class="tp-lab">{label}</div>{inner}</div>')
 
     c = st.columns([2.2, 2.2, 1.0, 1.4, 1.2])
     with c[0]:
-        b("△150にする指値後価格", target_text(t150))
+        target_card("△150 にする指値後価格", num(prop["target150"]))
     with c[1]:
-        b("○200にする指値後価格", target_text(t200))
+        target_card("○200 にする指値後価格", num(prop["target200"]))
     with c[2]:
         b("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
     with c[3]:

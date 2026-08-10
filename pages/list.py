@@ -9,7 +9,7 @@ import streamlit as st
 from auth import require_password
 from db import execute, query
 from nav import goto_property
-from theme import CALC_BG, compact_css, count, longtext, money, ratio
+from theme import compact_css, count, longtext, money, ratio
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
 compact_css()
@@ -72,23 +72,19 @@ view["メモ・コメント"] = (
     + view["仲介業者コメント"].fillna("").str.replace("\n", " ", regex=False)
 ).str.strip()
 
-CALC_COLS = ["cf基準", "到達150", "到達200", "築年数", "積算比率"]
 COLS = ["状況", "返信日付", "物件名", "所在地", "cf基準", "到達150", "到達200",
         "築年数", "価格", "積算比率", "メモ・コメント"]
 
 filtered = len(df) < len(all_df)
 count_text = (f"{len(df):,} 件（全 {len(all_df):,} 件中）" if filtered else f"{len(df):,} 件")
-st.caption(f"{count_text}　—　行の左端をクリックすると詳細画面へ　"
-          "／　「状況」を選ぶと行の色が変わります　"
-          "／　青色の列は自動計算された値です")
+st.caption(f"{count_text}　—　行の左端をクリックすると詳細画面へ移動します　"
+          "／　行の色は検討状況（下の「状況をまとめて変える」から変更できます）")
 
 
 def paint(row: pd.Series) -> list[str]:
-    """検討状況の色で行を塗る。色がない状況（確認中）は計算値列だけ青くする。"""
+    """検討状況の色で行を塗る。「確認中」は色を付けない（元Excelで塗りなしだったもの）。"""
     bg = COLOR_OF.get(row["状況"])
-    if bg:
-        return [f"background-color: {bg}"] * len(row)
-    return [f"background-color: {CALC_BG}" if c in CALC_COLS else "" for c in row.index]
+    return [f"background-color: {bg}"] * len(row) if bg else [""] * len(row)
 
 
 styled = view[COLS].style.apply(paint, axis=1)
@@ -118,27 +114,30 @@ with st.container(key="fulltable"):
         },
     )
 
+# 行を選んだら即座に詳細へ。
 rows = event.selection.rows
-
-# ── 選んだ物件の状況を変える ───────────────────────────────
 if rows:
-    picked = df.iloc[rows[0]]
-    st.divider()
-    c = st.columns([3, 2, 2])
-    c[0].markdown(f"**{picked['物件名']}**")
-    cur = picked["状況"] if picked["状況"] in STATUS_LIST else STATUS_LIST[0]
-    with c[1]:
-        new_status = st.selectbox(
-            "状況を変える", STATUS_LIST, index=STATUS_LIST.index(cur),
-            key=f"st_{picked['id']}",
-            help="　".join(f"{r.status}＝{r.description}" for _, r in statuses.iterrows()))
-    with c[2]:
-        b = st.columns(2)
-        if b[0].button("状況を保存", width="stretch",
-                       disabled=(new_status == picked["状況"])):
+    goto_property(df.iloc[rows[0]]["id"])
+
+# ── 状況をまとめて変える ───────────────────────────────────
+# 色を塗った表（Styler）は編集できないので、状況の変更はこちらで行う。
+with st.expander("状況をまとめて変える"):
+    st.caption("　".join(f"**{r.status}**＝{r.description}" for _, r in statuses.iterrows()))
+    edit_src = df[["id", "物件名", "状況"]].reset_index(drop=True)
+    edited = st.data_editor(
+        edit_src[["物件名", "状況"]],
+        width="stretch", hide_index=True, key="status_editor",
+        column_config={
+            "物件名": st.column_config.TextColumn("物件名", disabled=True, width="large"),
+            "状況":   st.column_config.SelectboxColumn("状況", options=STATUS_LIST,
+                                                       required=True, width="medium"),
+        },
+    )
+    changed = edited["状況"] != edit_src["状況"]
+    n = int(changed.sum())
+    if st.button(f"変更を保存（{n} 件）", type="primary", disabled=(n == 0)):
+        for i in edited.index[changed]:
             execute("update re_properties set status = :s, updated_at = now() where id = :id",
-                    {"s": new_status, "id": str(picked["id"])})
-            st.session_state.pop("property_table", None)
-            st.rerun()
-        if b[1].button("詳細へ →", type="primary", width="stretch"):
-            goto_property(picked["id"])
+                    {"s": edited.at[i, "状況"], "id": str(edit_src.at[i, "id"])})
+        st.success(f"{n} 件の状況を更新しました。")
+        st.rerun()

@@ -34,6 +34,21 @@ def compact_css(table_vh: str = TABLE_VH) -> None:
           height: {table_vh} !important;
           min-height: 320px;
       }}
+
+      /* 目標判定に乗せる価格のカード。st.metric の見た目に合わせ、
+         灰色の丸いタグ（指値率・指値幅）を2つ横に並べる。 */
+      .tp {{ padding: 0.1rem 0 0.4rem 0; }}
+      .tp-lab {{ font-size: 0.78rem; color: #666; }}
+      .tp-val {{ font-size: 1.35rem; font-weight: 600; line-height: 1.5; }}
+      .tp-pills {{ display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.15rem; }}
+      .tp-pill {{
+          background: rgba(128,128,128,0.15);
+          border-radius: 999px;
+          padding: 0.1rem 0.6rem;
+          font-size: 0.82rem;
+          color: #444;
+          white-space: nowrap;
+      }}
     </style>
     """)
 
