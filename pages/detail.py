@@ -243,8 +243,8 @@ def render_summary():
         target_card("○200 にする指値後価格", num(prop["t200_price"]),
                     num(prop["t200_rate"]), txt(prop["t200_cf"]))
 
-    st.caption(f"到達価格は販売価格を基準に算出　／　"
-              f"構造 {txt(prop['structure']) or '未設定'}・法定耐用年数 {prop['useful_life']:.0f}年"
+    st.caption(f"構造 {txt(prop['structure']) or '未設定'}"
+              f"・法定耐用年数 {prop['useful_life']:.0f}年"
               f"　／　元Excel {prop['excel_row']}行目")
     return ar, row
 
