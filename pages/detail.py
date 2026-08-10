@@ -366,19 +366,34 @@ def render_memo():
 def render_interactions():
     """この物件について誰と何を話したかを、種別ごとに分けて出す。"""
     st.markdown("#### この物件について話したこと")
+    # 会社名は拠点名（「ニッシー可児支店」等）に含まれるので、この画面では出さない。
+    # 担当者は1回の接触に複数人いることがあるので ' / ' で連ねる。
+    # 名寄せできなかった相手は person_name_raw に原文が残っているのでそれを使う。
     hist = query("""
         select i.kind,
-               c.name as 会社, o.branch_name as 拠点,
                i.occurred_on as 日付,
+               o.branch_name as 拠点,
+               (select string_agg(coalesce(p.name, ipe.person_name_raw), ' / ')
+                  from re_interaction_persons ipe
+                  left join re_persons p on p.id = ipe.person_id
+                 where ipe.interaction_id = i.id) as 担当者,
                ip.loanable_amount as 融資可能額,
                coalesce(ip.result, i.content) as 内容
         from re_interaction_properties ip
         join re_interactions i on i.id = ip.interaction_id
         join re_offices o on o.id = i.office_id
-        join re_companies c on c.id = o.company_id
         where ip.property_id = :pid
         order by i.occurred_on desc nulls last
     """, {"pid": str(prop["id"])})
+
+    # 値のない欄をそのまま渡すと Streamlit が "None" という文字を描いてしまう（実際に出ていた）。
+    # 日付は文字列にして、無い日付は空欄として見せる。
+    if not hist.empty:
+        hist["日付"] = (pd.to_datetime(hist["日付"], errors="coerce")
+                        .dt.strftime("%Y-%m-%d").fillna(""))
+        hist["融資可能額"] = pd.to_numeric(hist["融資可能額"], errors="coerce")
+        for col in ["拠点", "担当者", "内容"]:
+            hist[col] = hist[col].fillna("").astype(str)
 
     groups = [("bank_inquiry", "銀行打診", True),
               ("rental_hearing", "賃貸ヒアリング", False),
@@ -390,9 +405,19 @@ def render_interactions():
             continue
         shown_any = True
         st.caption(f"{label}　{len(part)} 件")
-        cols = ["会社", "拠点", "日付"] + (["融資可能額"] if with_amount else []) + ["内容"]
+        cols = ["日付", "拠点", "担当者"] + (["融資可能額"] if with_amount else []) + ["内容"]
+        # 1件も値がない列は出さない。融資可能額は現状139件すべて空で、
+        # 空の列があるだけで表が読みにくくなる。値が入れば自動でまた出る。
+        cols = [c for c in cols if part[c].notna().any()
+                and (part[c].astype(str).str.strip() != "").any()]
         st.dataframe(part[cols], width="stretch", hide_index=True,
-                    column_config={"融資可能額": money("融資可能額"), "内容": longtext("内容")})
+                    column_config={
+                        "日付": st.column_config.TextColumn("日付", width="small"),
+                        "拠点": st.column_config.TextColumn("拠点", width="medium"),
+                        "担当者": st.column_config.TextColumn("担当者", width="small"),
+                        "融資可能額": money("融資可能額"),
+                        "内容": longtext("内容"),
+                    })
 
     if not shown_any:
         st.caption("この物件についての打診・ヒアリングの記録はまだありません。")
