@@ -66,11 +66,25 @@ if kw:
 view = df.copy()
 # 価格は「指値後（入力があればそれ、なければ販売価格）」を1列で見せる
 view["価格"] = view["指値後価格"].fillna(view["販売価格"])
-# メモと業者コメントは1列にまとめる（改行は詰めて1行で読めるように）
-view["メモ・コメント"] = (
-    view["メモ"].fillna("").str.replace("\n", " ", regex=False) + "  "
-    + view["仲介業者コメント"].fillna("").str.replace("\n", " ", regex=False)
-).str.strip()
+# メモと業者コメントは1列にまとめる
+view["メモ・コメント"] = (view["メモ"].fillna("") + "  "
+                         + view["仲介業者コメント"].fillna("")).str.strip()
+
+
+def one_line(s):
+    """表に出す文字列から改行・タブを取り除く。
+
+    物件名やメモには改行が入っているものがあり（例：'イクス\\n(レントロール引き直し版)'）、
+    そのまま表に渡すと行の描画が崩れて真っ黒な行が現れる。
+    """
+    return (s.fillna("").astype(str)
+             .str.replace(r"[\r\n\t]+", " ", regex=True)
+             .str.replace(r"\s{2,}", " ", regex=True)
+             .str.strip())
+
+
+for col in ["物件名", "所在地", "メモ・コメント", "状況", "cf基準"]:
+    view[col] = one_line(view[col])
 
 COLS = ["状況", "返信日付", "物件名", "所在地", "cf基準", "到達150", "到達200",
         "築年数", "価格", "積算比率", "メモ・コメント"]

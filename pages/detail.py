@@ -143,18 +143,26 @@ else:
     prop = versions.iloc[0]
 
 def render_summary():
-    """この物件の要点。ぱっと目に入るよう、上部に太字でまとめて置く。"""
+    """この物件の要点。上から順に「物件のこと」→「値段のこと」→「判定」で並べる。"""
     purchase_price = num(prop["purchase_price"])
+    one = lambda s: txt(s).replace("\n", " ").strip()  # noqa: E731  改行を1行に畳む
 
-    # ── 指値後価格（入力値。ここだけ直接変えられる）────────
-    top = st.columns([2, 1, 5])
-    with top[0]:
+    # ── 1段目：物件そのもの ───────────────────────────────
+    c = st.columns([1.3, 3.0, 3.2, 1.5])
+    c[0].metric("返信日付", str(prop["reply_date"]) if prop["reply_date"] else "—")
+    c[1].metric("物件名", one(prop["name"]) or "（物件名なし）")
+    c[2].metric("所在地", one(prop["address"]) or "—")
+    c[3].metric("販売価格", f"{purchase_price:,.0f} 万円" if purchase_price else "—")
+
+    # ── 2段目：指値後価格（唯一の入力値）───────────────────
+    c = st.columns([1.3, 0.8, 6.9])
+    with c[0]:
         ar = st.number_input(
             "指値後価格（万円）",
             value=float(num(prop["negotiated_price"]) or purchase_price or 0),
             step=10.0, key=f"ar_{prop['id']}")
-    with top[1]:
-        st.write("")  # ラベル分の高さを合わせる
+    with c[1]:
+        st.write("")  # ラベル分だけ下げてボタンの高さを揃える
         if st.button("保存", type="primary", width="stretch"):
             execute("update re_properties set negotiated_price = :ar, updated_at = now() "
                     "where id = :id", {"ar": ar, "id": str(prop["id"])})
@@ -168,23 +176,7 @@ def render_summary():
     calc_in = {c: num(prop[c]) if c != "built_date" else day(prop[c]) for c in INPUT_COLS}
     row = query(LIVE_SQL, {**calc_in, "ar": ar}).iloc[0]
 
-    def b(label, value):
-        """ラベルと値を、本文と同じ文字サイズの太字で出す。"""
-        st.markdown(f"<div style='font-size:0.78rem;color:#666'>{label}</div>"
-                    f"<div style='font-weight:700'>{value}</div>", unsafe_allow_html=True)
-
-    # ── 1段目：返信日付・物件名・所在地・CF基準 ───────────
-    c = st.columns([1.2, 2.4, 2.8, 1.2])
-    with c[0]:
-        b("返信日付", str(prop["reply_date"]) if prop["reply_date"] else "—")
-    with c[1]:
-        b("物件名", prop["name"] or "（物件名なし）")
-    with c[2]:
-        b("所在地", txt(prop["address"]) or "—")
-    with c[3]:
-        b("CF基準", row["c_bu"] or "—")
-
-    # ── 2段目：目標到達価格・築年数・価格・積算比率 ────────
+    # ── 3段目：判定まわり ─────────────────────────────────
     def target_card(label, price):
         """到達価格のカード。値の下に「指値率」「指値幅」を灰色のタグで2つ並べる。"""
         if price is None or price <= 0:
@@ -201,22 +193,20 @@ def render_summary():
                      f'</div>')
         st.html(f'<div class="tp"><div class="tp-lab">{label}</div>{inner}</div>')
 
-    c = st.columns([2.2, 2.2, 1.0, 1.4, 1.2])
-    with c[0]:
-        target_card("△150 にする指値後価格", num(prop["target150"]))
-    with c[1]:
-        target_card("○200 にする指値後価格", num(prop["target200"]))
+    c = st.columns([1.2, 1.4, 2.2, 2.2, 1.0, 1.1])
+    c[0].metric("CF基準", row["c_bu"] or "—")
+    c[1].metric("価格（指値後）", f"{ar:,.0f} 万円",
+                f"{(1 - ar / purchase_price) * 100:.1f}% 指値", delta_color="off")
     with c[2]:
-        b("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
+        target_card("△150 にする指値後価格", num(prop["target150"]))
     with c[3]:
-        b("価格（指値後）", f"{ar:,.0f} 万円")
-    with c[4]:
-        b("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
+        target_card("○200 にする指値後価格", num(prop["target200"]))
+    c[4].metric("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
+    c[5].metric("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
 
-    st.caption(f"販売価格 {purchase_price:,.0f} 万円　／　"
-              f"現在の値引き率 {(1 - ar / purchase_price) * 100:.1f}%　／　"
-              f"到達価格は販売価格を基準に算出　／　"
-              f"構造 {txt(prop['structure']) or '未設定'}・法定耐用年数 {prop['useful_life']:.0f}年")
+    st.caption(f"到達価格は販売価格を基準に算出　／　"
+              f"構造 {txt(prop['structure']) or '未設定'}・法定耐用年数 {prop['useful_life']:.0f}年"
+              f"　／　元Excel {prop['excel_row']}行目")
     return ar, row
 
 
