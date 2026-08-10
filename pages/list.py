@@ -43,7 +43,7 @@ with c4:
 all_df = query("""
     select "状況", "行の色", "物件グループ", id,
            "版", "版数", "最新版", "元excel行",
-           "返信日付", "物件名", "所在地", "cf基準", "到達150", "到達200",
+           "登録日付", "物件名", "所在地", "cf基準", "到達150", "到達200",
            "築年数", "販売価格", "指値後価格", "入居数", "戸数", "積算比率",
            "メモ", "仲介業者コメント", "構造", "満室利回", "実質cf", "紹介元会社"
     from re_properties_v
@@ -96,7 +96,7 @@ def one_line(s):
 for col in ["物件名", "所在地", "メモ・コメント", "状況", "cf基準"]:
     view[col] = one_line(view[col])
 
-COLS = ["状況", "返信日付", "物件名", "所在地", "cf基準", "到達150", "到達200",
+COLS = ["状況", "登録日付", "物件名", "所在地", "cf基準", "到達150", "到達200",
         "築年数", "価格", "入居状況", "積算比率", "メモ・コメント"]
 
 filtered = len(df) < len(all_df)
@@ -127,7 +127,7 @@ with st.container(key="fulltable"):
         key="property_table",
         column_config={
             "状況":       st.column_config.TextColumn("状況", width="small"),
-            "返信日付":   st.column_config.DateColumn("返信日付", format="YYYY-MM-DD"),
+            "登録日付":   st.column_config.DateColumn("登録日付", format="YYYY-MM-DD"),
             "物件名":     st.column_config.TextColumn("物件名", width="medium"),
             "所在地":     st.column_config.TextColumn("所在地", width="medium"),
             "cf基準":     st.column_config.TextColumn("CF基準", width="small"),

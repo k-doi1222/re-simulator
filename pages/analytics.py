@@ -59,9 +59,9 @@ with left:
 with right:
     st.markdown("#### 月別の流入")
     flow = query("""
-        select to_char("返信日付",'YYYY-MM') as 月, count(*) as 物件数,
+        select to_char("登録日付",'YYYY-MM') as 月, count(*) as 物件数,
                count(*) filter (where left("cf基準",1) in ('◎','○','△')) as 検討値
-        from re_properties_v where "返信日付" is not null group by 1 order by 1
+        from re_properties_v where "登録日付" is not null group by 1 order by 1
     """)
     melted = flow.melt("月", var_name="区分", value_name="件数")
     st.altair_chart(

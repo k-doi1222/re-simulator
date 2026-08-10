@@ -156,21 +156,24 @@ def render_summary():
     one = lambda s: txt(s).replace("\n", " ").strip()  # noqa: E731  改行を1行に畳む
 
     # ── 1段目：物件そのもの ───────────────────────────────
-    c = st.columns([1.3, 3.0, 3.2, 1.5])
-    c[0].metric("返信日付", str(prop["reply_date"]) if prop["reply_date"] else "—")
-    c[1].metric("物件名", one(prop["name"]) or "（物件名なし）")
-    c[2].metric("所在地", one(prop["address"]) or "—")
-    c[3].metric("販売価格", f"{purchase_price:,.0f} 万円" if purchase_price else "—")
+    c = st.columns([3.0, 3.2, 1.3])
+    c[0].metric("物件名", one(prop["name"]) or "（物件名なし）")
+    c[1].metric("所在地", one(prop["address"]) or "—")
+    c[2].metric("登録日付", str(prop["reply_date"]) if prop["reply_date"] else "—")
 
-    # ── 2段目：指値後価格（唯一の入力値）───────────────────
-    c = st.columns([1.3, 0.8, 6.9])
-    with c[0]:
+    # ── 2段目：値段。販売価格（元値）のすぐ隣で指値後価格を動かせるようにする ──
+    # 入力欄の列は「指値後価格（万円）」のラベルが1行に収まる幅を確保する。
+    # 折り返すと入力欄が1行分下がり、隣の保存ボタンと高さがずれる。
+    # vertical_alignment="bottom" で、ラベルの有無に関わらず下端を揃える。
+    c = st.columns([1.3, 2.1, 0.8, 5.3], vertical_alignment="bottom")
+    c[0].metric("販売価格", f"{purchase_price:,.0f} 万円" if purchase_price else "—")
+    with c[1]:
+        # 整数に見せるのは書式だけ。int のウィジェットにすると保存時に丸めてしまう
         ar = st.number_input(
             "指値後価格（万円）",
             value=float(num(prop["negotiated_price"]) or purchase_price or 0),
-            step=10.0, key=f"ar_{prop['id']}")
-    with c[1]:
-        st.write("")  # ラベル分だけ下げてボタンの高さを揃える
+            step=10.0, format="%.0f", key=f"ar_{prop['id']}")
+    with c[2]:
         if st.button("保存", type="primary", width="stretch"):
             execute("update re_properties set negotiated_price = :ar, updated_at = now() "
                     "where id = :id", {"ar": ar, "id": str(prop["id"])})
@@ -224,7 +227,7 @@ def render_summary():
     with c[0]:
         card("CF基準", row["c_bu"] or "—")
     with c[1]:
-        card("価格（指値後）", f"{ar:,.0f} 万円", [discount_pill(ar)])
+        card("指値後価格", f"{ar:,.0f} 万円", [discount_pill(ar)])
     with c[2]:
         card("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
     with c[3]:
@@ -418,7 +421,8 @@ def render_edit_form():
     with st.form(key=f"edit_{prop['id']}"):
         # B / C / D ＋ X / Y
         c = st.columns([2, 3, 3, 2, 2])
-        f_reply = c[0].date_input("返信日付", day(prop["reply_date"]))
+        # 元Excelの列名は「返信日付」だが、実態はこのDBに登録した日付なので画面上は「登録日付」
+        f_reply = c[0].date_input("登録日付", day(prop["reply_date"]))
         f_addr = c[1].text_input("所在地", txt(prop["address"]))
         f_name = c[2].text_input("物件名", txt(prop["name"]))
         f_contact = c[3].text_input("返信手段", txt(prop["contact_method"]))
@@ -541,7 +545,7 @@ def render_versions():
     st.caption("同じ物件の前提違い・時点違いを横に並べています。")
     cmp = query("""
         select "版", "元excel行", "販売価格", "指値後価格", "満室利回",
-               "積算比率", "実質cf", "cf基準", "返信日付"
+               "積算比率", "実質cf", "cf基準", "登録日付"
         from re_properties_v
         where "物件グループ" = :gid
         order by "元excel行"

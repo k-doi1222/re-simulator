@@ -32,7 +32,7 @@ with st.form("new_property"):
     c = st.columns([3, 3, 2, 2])
     name = c[0].text_input("物件名 *", placeholder="例：グランドコート")
     address = c[1].text_input("所在地")
-    reply_date = c[2].date_input("返信日付", datetime.date.today())
+    reply_date = c[2].date_input("登録日付", datetime.date.today())
     src = c[3].selectbox("紹介元", office_opts,
                          help="この物件を持ってきてくれた仲介業者")
 
