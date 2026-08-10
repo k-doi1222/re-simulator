@@ -36,6 +36,23 @@ def execute(sql: str, params: dict | None = None) -> None:
     query.clear()
 
 
+def refresh_calc_cache() -> int:
+    """一覧に出す計算値のうち、古くなったものだけ計算し直す。
+
+    `re_properties_v` は計算関数を毎回呼ばず `re_property_calc_cache` を読む。
+    そのため、表示する前にこれを呼んで最新にしておく。
+
+    計算し直すのは「入力値が変わった物件」と「築年数が変わった物件」だけなので、
+    ふだんは0件で一瞬（実測0.05秒）で返る。0件のときは Streamlit 側のキャッシュを
+    捨てない（毎回捨てると画面の再描画がそのたび遅くなるため）。
+    """
+    with get_engine().begin() as conn:
+        n = conn.execute(text("select re_refresh_calc_cache()")).scalar_one()
+    if n:
+        query.clear()
+    return int(n or 0)
+
+
 def check_connection() -> tuple[bool, str]:
     """接続確認。成功なら (True, バージョン文字列)、失敗なら (False, エラー内容)。"""
     try:

@@ -7,11 +7,14 @@ import pandas as pd
 import streamlit as st
 
 from auth import require_password
-from db import execute, query
+from db import execute, query, refresh_calc_cache
 from nav import goto_property
 from theme import compact_css, count, longtext, money, ratio
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
+# 一覧に出す計算値は re_property_calc_cache から読む。
+# 表示の前に、古くなったものだけ計算し直す（ふだんは0件で一瞬）。
+refresh_calc_cache()
 compact_css()
 
 head = st.columns([4, 1])

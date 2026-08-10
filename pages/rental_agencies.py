@@ -9,12 +9,16 @@
 import streamlit as st
 
 from auth import require_password
+from db import refresh_calc_cache
 from nav import render_back_to_property
 from office_card import render_office_card, render_office_picker
 from partners import render_history, render_offices, render_persons
 from theme import compact_css
 
 require_password()
+# 一覧に出す計算値は re_property_calc_cache から読む。
+# 表示の前に、古くなったものだけ計算し直す（ふだんは0件で一瞬）。
+refresh_calc_cache()
 compact_css()
 
 st.markdown("### 賃貸仲介")

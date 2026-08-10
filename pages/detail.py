@@ -14,33 +14,44 @@ import pandas as pd
 import streamlit as st
 
 from auth import require_password
-from db import execute, query
+from db import execute, query, refresh_calc_cache
 from nav import goto_office_edit
 from theme import CALC_BG, compact_css, count, money, ratio
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
+# 一覧に出す計算値は re_property_calc_cache から読む。
+# 表示の前に、古くなったものだけ計算し直す（ふだんは0件で一瞬）。
+refresh_calc_cache()
 compact_css()
 
 RAW_COLS = """
-    id, excel_row, name, name_raw, address, structure, reply_date, zoning, status,
-    memo, input_memo, broker_comment, bank_inquiry_result,
-    contact_method, inquiry_channel,
-    purchase_price, negotiated_price, land_area, road_price_actual, zone_coef, shape_coef,
-    floor_area, built_date, full_income, current_income, extra_cost, property_tax,
-    occupied_units, total_units, parking_spaces, external_parking,
-    has_elevator, has_septic_tank, free_internet, hazard,
-    legal_useful_life, bank_offered_rate, scenario_label,
-    coalesce(legal_useful_life, re_useful_life_by_structure(structure)) as useful_life,
+    p.id, p.excel_row, p.name, p.name_raw, p.address, p.structure, p.reply_date,
+    p.zoning, p.status,
+    p.memo, p.input_memo, p.broker_comment, p.bank_inquiry_result,
+    p.contact_method, p.inquiry_channel,
+    p.purchase_price, p.negotiated_price, p.land_area, p.road_price_actual,
+    p.zone_coef, p.shape_coef,
+    p.floor_area, p.built_date, p.full_income, p.current_income, p.extra_cost,
+    p.property_tax,
+    p.occupied_units, p.total_units, p.parking_spaces, p.external_parking,
+    p.has_elevator, p.has_septic_tank, p.free_internet, p.hazard,
+    p.legal_useful_life, p.bank_offered_rate, p.scenario_label,
+    coalesce(p.legal_useful_life, re_useful_life_by_structure(p.structure)) as useful_life,
     -- 目標判定に乗せる価格は100万円刻み。丸めた分だけ目標を上回るので、
     -- 減額幅ではなく「その価格でのCF基準」を見せる。
-    (select price         from re_target_price_detail(id, 150)) as t150_price,
-    (select discount_rate from re_target_price_detail(id, 150)) as t150_rate,
-    (select cf_mark || cf_value::text
-       from re_target_price_detail(id, 150))                    as t150_cf,
-    (select price         from re_target_price_detail(id, 200)) as t200_price,
-    (select discount_rate from re_target_price_detail(id, 200)) as t200_rate,
-    (select cf_mark || cf_value::text
-       from re_target_price_detail(id, 200))                    as t200_cf
+    t150.price as t150_price, t150.discount_rate as t150_rate,
+    t150.cf_mark || t150.cf_value::text as t150_cf,
+    t200.price as t200_price, t200.discount_rate as t200_rate,
+    t200.cf_mark || t200.cf_value::text as t200_cf
+"""
+
+# 実質CFは指値後価格に対して完全に線形なので、係数を1回求めれば150も200も出る。
+# 目標ごとに re_target_price_detail を呼ぶと、そのたびに2点サンプルを計算し直して
+# 1画面で12回も計算していた（実測1.8秒 → 72ms）。
+TARGET_JOIN = """
+    cross join lateral re_target_price_coef(p.id) k
+    cross join lateral re_target_from_coef(k.am, k.kk, k.cc, 150) t150
+    cross join lateral re_target_from_coef(k.am, k.kk, k.cc, 200) t200
 """
 
 # 計算関数に渡す入力値。どちらのSQLでも同じ列名で使う。
@@ -118,12 +129,13 @@ if not sel_id:
     st.stop()
 
 versions = query(f"""
-    select {RAW_COLS}, coalesce(parent_property_id, id) as group_id
-    from re_properties
-    where coalesce(parent_property_id, id) = (
+    select {RAW_COLS}, coalesce(p.parent_property_id, p.id) as group_id
+    from re_properties p
+    {TARGET_JOIN}
+    where coalesce(p.parent_property_id, p.id) = (
         select coalesce(parent_property_id, id) from re_properties where id = :id
     )
-    order by excel_row
+    order by p.excel_row
 """, {"id": sel_id})
 
 if versions.empty:
