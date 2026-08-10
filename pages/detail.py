@@ -247,34 +247,81 @@ def render_summary():
 
 
 def render_calc_detail(ar, row):
-    """判定まわりの計算値。要点に入りきらないものはここに畳んでおく。"""
+    """判定まわりの計算値。要点に入りきらないものはまとめてここに畳んでおく。
+
+    3つのCFはどれも「収入 − 管理費 − 返済 − 追加費用 − 固都税」で、
+    収入の取り方だけが違う。数字の出どころが分かるよう、
+    実際に使った値を差し込んだ説明を「?」で出す。
+    """
     if row is None:
         return
-    # 上の要点に出しているもの（CF基準・満室利回り）はここでは繰り返さない
-    with st.container(key="calc_block"):
-        m = st.columns(4)
-        m[0].metric("実質CF", f"{row['c_bt']:,.0f} 万円" if pd.notna(row["c_bt"]) else "—")
-        m[1].metric("積算評価", f"{row['c_bo']:,.0f} 万円" if pd.notna(row["c_bo"]) else "—")
-        m[2].metric("現況利回り", f"{row['c_br'] * 100:.1f}%" if pd.notna(row["c_br"]) else "—")
-        m[3].metric("年間返済額", f"{row['c_cd']:,.0f} 万円" if pd.notna(row["c_cd"]) else "—")
 
-    # 上に出しているもの（築年数・積算評価・現況利回・年間返済）はここでは繰り返さない
-    with st.expander("その他の計算値"):
+    def yen(v):
+        return f"{v:,.0f} 万円" if pd.notna(v) else "—"
+
+    bd = num(prop["full_income"])          # 満室年収
+    be = num(prop["current_income"])       # 現況年収
+    bh = num(prop["extra_cost"])           # EV費等の追加
+    tax_actual = num(prop["property_tax"])  # 固都税の実額（未入力なら仮計算を使う）
+    tax_used = tax_actual if tax_actual is not None else row["c_av"]
+    tax_note = ("固都税（実額）" if tax_actual is not None
+                else "固都税（実額が未入力のため建物評価から仮計算）")
+
+    common = (
+        f"\n\n**共通で差し引くもの**\n"
+        f"- 管理費 {yen(row['c_ca'])}"
+        f"（満室年収 × 管理費率 {row['c_dg']:.1f}%。管理費率は 9 ＋ 築年数 ÷ 3）\n"
+        f"- 年間返済額 {yen(row['c_cd'])}"
+        f"（指値後価格の全額を金利1.5%・{row['c_by']:.0f}年で元利均等返済）\n"
+        f"- EV費等の追加 {yen(bh) if bh is not None else '0 万円'}\n"
+        f"- {tax_note} {yen(tax_used)}")
+
+    with st.expander("計算値の内訳", expanded=True):
+        with st.container(key="calc_block"):
+            m = st.columns(4)
+            m[0].metric("実質CF", yen(row["c_bt"]), help=(
+                "投資判断に使う本命の数字。満室にはならない前提で、"
+                "満室年収を92%に割り引いて計算します。\n\n"
+                f"満室年収 {yen(bd)} × 92% ＝ {yen(row['c_bz'])} から差し引いて "
+                f"**{yen(row['c_bt'])}**" + common))
+            m[1].metric("満室時CF", yen(row["c_bs"]), help=(
+                "満室が続いた場合のCF。上振れの上限を見る数字です。\n\n"
+                f"満室年収 {yen(bd)} から差し引いて **{yen(row['c_bs'])}**" + common))
+            m[2].metric("現況CF", yen(row["c_bv"]), help=(
+                "今の入居状況のままだった場合のCF。下振れの目安です。\n\n"
+                f"現況年収 {yen(be)} から差し引いて **{yen(row['c_bv'])}**" + common))
+            m[3].metric("年間返済額", yen(row["c_cd"]), help=(
+                f"指値後価格の全額を借りる前提。金利1.5%・融資年数 {row['c_by']:.0f}年"
+                "（法定耐用年数 − 築年数、上限30年）の元利均等返済です。"))
+
         with st.container(key="detail_calc"):
             g = st.columns(6)
-            g[0].metric("融資年数", f"{row['c_by']:.0f} 年" if pd.notna(row["c_by"]) else "—")
-            g[1].metric("土地評価", f"{row['c_bm']:,.0f}" if pd.notna(row["c_bm"]) else "—")
-            g[2].metric("建物評価", f"{row['c_bn']:,.0f}" if pd.notna(row["c_bn"]) else "—")
-            g[3].metric("購入諸経費", f"{row['c_bw']:,.0f}" if pd.notna(row["c_bw"]) else "—")
-            g[4].metric("固都税(仮)", f"{row['c_av']:,.0f}" if pd.notna(row["c_av"]) else "—")
-            g[5].metric("7年通算損益", f"{row['c_dq']:,.0f}" if pd.notna(row["c_dq"]) else "—")
+            g[0].metric("積算評価", yen(row["c_bo"]),
+                        help="土地評価 ＋ 建物評価。銀行が担保として見る価格です。")
+            g[1].metric("土地評価", f"{row['c_bm']:,.0f}" if pd.notna(row["c_bm"]) else "—",
+                        help="土地面積 × 路線価 × 用途地域係数・土地形状係数の補正")
+            g[2].metric("建物評価", f"{row['c_bn']:,.0f}" if pd.notna(row["c_bn"]) else "—",
+                        help="単価19 × 延床面積 ×（法定耐用年数 − 築年数）÷ 法定耐用年数")
+            g[3].metric("現況利回り",
+                        f"{row['c_br'] * 100:.1f}%" if pd.notna(row["c_br"]) else "—",
+                        help="現況年収 ÷ 指値後価格")
+            g[4].metric("融資年数", f"{row['c_by']:.0f} 年" if pd.notna(row["c_by"]) else "—",
+                        help="法定耐用年数 − 築年数（上限30年・下限0年）")
+            g[5].metric("返済比率", f"{row['c_cb'] * 100:.0f}%" if pd.notna(row["c_cb"]) else "—",
+                        help="年間返済額 ÷ 満室年収")
             g2 = st.columns(6)
-            g2[0].metric("満室時CF", f"{row['c_bs']:,.0f}" if pd.notna(row["c_bs"]) else "—")
-            g2[1].metric("現況CF", f"{row['c_bv']:,.0f}" if pd.notna(row["c_bv"]) else "—")
-            g2[2].metric("返済比率", f"{row['c_cb'] * 100:.0f}%" if pd.notna(row["c_cb"]) else "—")
-            g2[3].metric("管理費率", f"{row['c_dg']:.1f}%" if pd.notna(row["c_dg"]) else "—")
-            g2[4].metric("収益還元評価", f"{row['c_cn']:,.0f}" if pd.notna(row["c_cn"]) else "—")
-            g2[5].metric("7年後積算", f"{row['c_dm']:,.0f}" if pd.notna(row["c_dm"]) else "—")
+            g2[0].metric("購入諸経費", f"{row['c_bw']:,.0f}" if pd.notna(row["c_bw"]) else "—",
+                         help="固都税 × 5 ＋ 指値後価格 × 3%")
+            g2[1].metric("固都税(仮)", f"{row['c_av']:,.0f}" if pd.notna(row["c_av"]) else "—",
+                         help="実額が未入力のときに使う概算。建物評価 × 1.2%")
+            g2[2].metric("管理費率", f"{row['c_dg']:.1f}%" if pd.notna(row["c_dg"]) else "—",
+                         help="9 ＋ 築年数 ÷ 3。古いほど管理費がかさむ前提")
+            g2[3].metric("収益還元評価", f"{row['c_cn']:,.0f}" if pd.notna(row["c_cn"]) else "—",
+                         help="満室年収 × 75% ÷ 収益還元率9%")
+            g2[4].metric("7年後積算", f"{row['c_dm']:,.0f}" if pd.notna(row["c_dm"]) else "—",
+                         help="7年後の土地評価 ＋ 建物評価。出口の目安")
+            g2[5].metric("7年通算損益", f"{row['c_dq']:,.0f}" if pd.notna(row["c_dq"]) else "—",
+                         help="7年間のCF累計 −（購入価格 − 7年後積算評価）")
 
 
 def render_memo():
@@ -398,9 +445,12 @@ def render_edit_form():
                      help="元Excel AD列。ケーブルテレビ・インターネットの無料提供")
         f_hazard = c[3].text_input("ハザード", txt(prop["hazard"]),
                                    help="例：浸水／土砂災害／津波5m")
-        f_occ = c[4].number_input("入居数", value=num(prop["occupied_units"]), step=1.0)
-        f_total = c[5].number_input("戸数", value=num(prop["total_units"]), step=1.0)
-        f_park = c[6].number_input("駐車場", value=num(prop["parking_spaces"]), step=1.0)
+        f_occ = c[4].number_input("入居数", value=num(prop["occupied_units"]),
+                                  step=1.0, format="%.0f")
+        f_total = c[5].number_input("戸数", value=num(prop["total_units"]),
+                                    step=1.0, format="%.0f")
+        f_park = c[6].number_input("駐車場", value=num(prop["parking_spaces"]),
+                                   step=1.0, format="%.0f")
         f_expark = c[7].text_input("敷地外駐車場", txt(prop["external_parking"]))
 
         # AL / AM / AR / AU / AW ＋ 構造

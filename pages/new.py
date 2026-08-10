@@ -67,7 +67,7 @@ with st.form("new_property"):
     total = c[5].number_input("総戸数", value=None, step=1.0, format="%.0f")
 
     c = st.columns(6)
-    park = c[0].number_input("駐車場(台)", value=None, step=1.0)
+    park = c[0].number_input("駐車場(台)", value=None, step=1.0, format="%.0f")
     expark = c[1].text_input("敷地外駐車場")
     ev = c[2].selectbox("EV", ["", "あり", "なし"])
     septic = c[3].selectbox("浄化槽", ["", "あり", "なし"])

@@ -41,16 +41,14 @@ with c4:
     kw = st.text_input("物件名・所在地・メモで検索", placeholder="例：ビバリーヒルズ / 美濃加茂")
 
 all_df = query("""
-    select v."状況", v."行の色", v."物件グループ", v.id,
-           v."版", v."版数", v."最新版", v."元excel行",
-           v."返信日付", v."物件名", v."所在地", v."cf基準", v."到達150", v."到達200",
-           v."築年数", v."販売価格", v."指値後価格", v."積算比率",
-           v."メモ", v."仲介業者コメント", v."構造", v."満室利回", v."実質cf", v."紹介元会社",
-           p.occupied_units, p.total_units
-    from re_properties_v v
-    join re_properties p on p.id = v.id
-    where (not :latest_only or v."最新版")
-    order by v."実質cf" desc nulls last
+    select "状況", "行の色", "物件グループ", id,
+           "版", "版数", "最新版", "元excel行",
+           "返信日付", "物件名", "所在地", "cf基準", "到達150", "到達200",
+           "築年数", "販売価格", "指値後価格", "入居数", "戸数", "積算比率",
+           "メモ", "仲介業者コメント", "構造", "満室利回", "実質cf", "紹介元会社"
+    from re_properties_v
+    where (not :latest_only or "最新版")
+    order by "実質cf" desc nulls last
 """, {"latest_only": latest_only})
 
 df = all_df
@@ -80,8 +78,7 @@ def occupancy(occ, total):
     return "" if o == "—" and t == "—" else f"{o}/{t}"
 
 
-view["入居状況"] = [occupancy(o, t)
-                   for o, t in zip(view["occupied_units"], view["total_units"])]
+view["入居状況"] = [occupancy(o, t) for o, t in zip(view["入居数"], view["戸数"])]
 
 
 def one_line(s):
