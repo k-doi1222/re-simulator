@@ -106,9 +106,13 @@ st.caption(f"{count_text}　—　行の左端をクリックすると詳細画�
 
 
 def paint(row: pd.Series) -> list[str]:
-    """検討状況の色で行を塗る。「確認中」は色を付けない（元Excelで塗りなしだったもの）。"""
-    bg = COLOR_OF.get(row["状況"])
-    return [f"background-color: {bg}"] * len(row) if bg else [""] * len(row)
+    """検討状況の色で行を塗る。
+
+    ★空文字を返してはいけない。色を指定しないセルは黒く描画されてしまうため、
+    塗らないつもりの状況（確認中）も白を明示する。
+    """
+    bg = COLOR_OF.get(row["状況"]) or "#FFFFFF"
+    return [f"background-color: {bg}"] * len(row)
 
 
 styled = view[COLS].style.apply(paint, axis=1)
