@@ -22,7 +22,9 @@ def compact_css(table_vh: str = TABLE_VH) -> None:
           border-radius: 0.4rem;
           padding: 0.5rem 0.8rem;
       }}
-      .block-container {{ padding-top: 2.5rem; padding-bottom: 1rem; }}
+      /* 上余白はStreamlitのヘッダー(56px)より広く取ること。
+         詰めすぎると画面上部の要素がヘッダーの下に隠れる（基準文字サイズ15pxで4.5rem=67.5px）。 */
+      .block-container {{ padding-top: 4.5rem; padding-bottom: 1rem; }}
       div[data-testid="stMetricValue"] {{ font-size: 1.35rem; }}
       div[data-testid="stMetricLabel"] {{ font-size: 0.78rem; }}
       div[data-testid="stVerticalBlock"] {{ gap: 0.5rem; }}
