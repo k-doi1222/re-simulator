@@ -292,7 +292,7 @@ def render_calc_detail(ar, row):
         f"- EV費等の追加 {yen(bh) if bh is not None else '0 万円'}\n"
         f"- {tax_note} {yen(tax_used)}")
 
-    with st.expander("計算値の内訳", expanded=True):
+    with st.expander("計算値の内訳"):
         with st.container(key="calc_block"):
             m = st.columns(4)
             m[0].metric("実質CF", yen(row["c_bt"]), help=(
@@ -485,7 +485,6 @@ def render_edit_form():
       → BD満室年収 BE現況年収 BH EV費等の追加
     """
     st.markdown("#### 物件情報")
-    st.caption("並びは元Excel「■RC一般 V2」の列順に合わせています。")
     structures = query("select structure from re_structure_types order by sort_order"
                        )["structure"].tolist()
 
@@ -640,8 +639,9 @@ def render_main():
     ar, row = render_summary()
     render_memo()
     render_interactions()
-    render_calc_detail(ar, row)
     render_edit_form()
+    # 計算値の内訳は、ふだんは見ない。物件情報のさらに下に畳んで置く
+    render_calc_detail(ar, row)
 
 
 # 版が1つだけならタブを出さず、まるごと1画面にする。
