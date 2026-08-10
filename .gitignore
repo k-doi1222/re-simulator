@@ -15,3 +15,5 @@ wheels/
 # ローカル起動時のログとPID
 .streamlit_server.log
 .streamlit_server.pid
+.streamlit/secrets.toml.*
+!.streamlit/secrets.toml.example
