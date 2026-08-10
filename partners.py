@@ -241,10 +241,16 @@ def render_person_editor(company_kind: str, preset_office_id: str | None = None,
 
         labels = offices["label"].tolist()
         key = f"pe_off_{company_kind}"
-        # 指定された拠点は「1回だけ」選び直す。毎回上書きすると、
-        # 画面上で別の拠点に切り替えられなくなる。
         applied = f"{key}_applied"
-        if preset_office_id and st.session_state.get(applied) != str(preset_office_id):
+        # 指定された拠点を選び直すのは次の2つの場合だけ。
+        #   (1) 指定が変わったとき
+        #   (2) 選択状態そのものが無いとき
+        # Streamlit は画面を離れるとウィジェットの選択状態を捨てるが、
+        # ここで置くフラグ(applied)は残る。(2)を見ないと、同じ物件から
+        # 2回目に飛んできたときに選び直しがスキップされ、先頭の拠点が出てしまう。
+        # 逆に毎回上書きすると、画面上で別の拠点に切り替えられなくなる。
+        if preset_office_id and (key not in st.session_state
+                                 or st.session_state.get(applied) != str(preset_office_id)):
             hit = offices.index[offices["id"].astype(str) == str(preset_office_id)]
             if len(hit):
                 st.session_state[key] = offices.at[hit[0], "label"]
