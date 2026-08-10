@@ -1,13 +1,17 @@
 """売買仲介 — UC-8 関係管理、UC-9 担当者の異動追随
 
 物件を持ってきてくれる源泉なので、関係を切らさないことが大事。
-最終接触からの経過日数が長い先ほど上に出す。
+
+画面は「1拠点のカルテ」を主役にしている。会社・担当者・やりとりは
+3つでひとまとまりの情報なので、タブに分けると読みにくく、直すのにも辿り着けない。
+横断で見たいもの（拠点一覧・やりとり一覧・担当者一覧）は下に畳んである。
 """
 import streamlit as st
 
 from auth import require_password
-from partners import (render_add_interaction, render_history,
-                      render_office_jump_panel, render_offices, render_persons)
+from nav import render_back_to_property
+from office_card import render_office_card, render_office_picker
+from partners import render_history, render_offices, render_persons
 from theme import compact_css
 
 require_password()
@@ -15,22 +19,23 @@ compact_css()
 
 st.markdown("### 売買仲介")
 
-# 物件詳細から「この相手先を直す」で来たときは、タブの外に編集欄を出す
-# （Streamlit はタブを自動で開けないため）
-render_office_jump_panel("sales_broker")
+# 物件詳細から飛んできたときだけ、戻るボタンを出す
+render_back_to_property("sales_broker")
 
-tab_co, tab_hist, tab_person, tab_add = st.tabs(
-    ["会社・拠点", "やりとり", "担当者", "記録する"])
+# ══ 拠点のカルテ（この画面の主役）══════════════════════════
+office_id = render_office_picker("sales_broker")
+if office_id:
+    render_office_card("sales_broker", office_id)
 
-with tab_co:
+st.divider()
+
+# ══ 横断で見る ═════════════════════════════════════════════
+with st.expander("会社・拠点の一覧（最終接触からの経過が長い順）"):
     render_offices("sales_broker", show_referrals=True)
 
-with tab_hist:
+with st.expander("やりとりを横断で見る"):
     render_history(["sales_contact"], "sales_broker",
                    hint="例：値下げ / 売り急ぎ / 買付")
 
-with tab_person:
+with st.expander("担当者を横断で見る"):
     render_persons("sales_broker")
-
-with tab_add:
-    render_add_interaction("sales_broker", {"売買仲介とのやりとり": "sales_contact"})

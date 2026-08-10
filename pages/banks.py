@@ -2,13 +2,19 @@
 
 303支店のうち接触済みは27支店しかなく、残りは未活用のリード。
 「次にどこへ当たるか」を選べることと、「聞けた融資条件を見比べられること」が目的。
+
+画面は「1支店のカルテ」を主役にしている。支店・担当者・打診の内容は
+3つでひとまとまりの情報なので、タブに分けると読みにくく、直すのにも辿り着けない。
+横断で見たいもの（支店を探す・打診の結果・担当者一覧）は下に畳んである。
 """
 import streamlit as st
 
 from auth import require_password
-from db import execute, query
-from nav import goto_property
-from partners import render_office_jump_panel, render_persons
+from db import query
+from nav import goto_property, render_back_to_property
+from office_card import (render_office_card, render_office_picker,
+                         request_office)
+from partners import render_persons
 from theme import compact_css, count, longtext, money
 
 require_password()
@@ -32,15 +38,18 @@ m[1].metric("接触済み", f"{stat['接触済']:,}",
 m[2].metric("融資条件を聞けた", f"{stat['条件聴取済']:,}")
 m[3].metric("担当者を把握", f"{stat['担当者把握']:,}")
 
-# 物件詳細から「この相手先を直す」で来たときは、タブの外に編集欄を出す
-# （Streamlit はタブを自動で開けないため）
-render_office_jump_panel("bank")
+# 物件詳細から飛んできたときだけ、戻るボタンを出す
+render_back_to_property("bank")
 
-tab_list, tab_result, tab_person, tab_add = st.tabs(
-    ["支店を探す", "打診の結果", "担当者", "記録する"])
+# ══ 支店のカルテ（この画面の主役）══════════════════════════
+office_id = render_office_picker("bank")
+if office_id:
+    render_office_card("bank", office_id)
 
-# ══ 支店を探す ═════════════════════════════════════════════
-with tab_list:
+st.divider()
+
+# ══ 横断で見る ═════════════════════════════════════════════
+with st.expander("支店を探す（303支店から絞り込む）"):
     opts = query("""
         select distinct coalesce(bank_category,'(未設定)') as v, 'cat' as k from re_offices
         union all
@@ -56,13 +65,15 @@ with tab_list:
     f_kw = c[3].text_input("銀行名・支店名で検索")
 
     df = query("""
-        select "銀行", "支店", "区分", "地域", "電話", "担当者", "打診回数",
+        select office_id,
+               "銀行", "支店", "区分", "地域", "電話", "担当者", "打診回数",
                "総合評価", "候補", "融資エリア", "融資期間", "金利", "融資上限",
                "フルローン", "新設法人"
         from re_bank_offices_v
         where (:no_cat or coalesce("区分",'(未設定)') = any(:cats))
           and (:no_reg or coalesce("地域",'(未設定)') = any(:regs))
-          and (:kw = '' or "銀行" ilike '%%'||:kw||'%%' or coalesce("支店",'') ilike '%%'||:kw||'%%')
+          and (:kw = '' or "銀行" ilike '%%'||:kw||'%%'
+               or coalesce("支店",'') ilike '%%'||:kw||'%%')
           and case :state
                 when '未接触のみ'   then "打診回数" = 0
                 when '接触済みのみ' then "打診回数" > 0
@@ -74,13 +85,16 @@ with tab_list:
           "no_reg": not f_reg, "regs": f_reg or [""],
           "kw": f_kw, "state": f_state})
 
-    st.caption(f"{len(df):,} 支店")
-    with st.container(key="fulltable_banks"):
-        st.dataframe(df, width="stretch", hide_index=True,
-                    column_config={"打診回数": count("打診回数")})
+    st.caption(f"{len(df):,} 支店　—　行を選ぶと、その支店のカルテを開きます")
+    ev = st.dataframe(df.drop(columns=["office_id"]), width="stretch", hide_index=True,
+                     on_select="rerun", selection_mode="single-row", key="bank_list",
+                     column_config={"打診回数": count("打診回数")})
+    rows = ev.selection.rows
+    if rows:
+        request_office("bank", df.iloc[rows[0]]["office_id"])
+        st.rerun()
 
-# ══ 打診の結果 ═════════════════════════════════════════════
-with tab_result:
+with st.expander("打診の結果を横断で見る"):
     st.caption("1つの物件を複数の銀行へ打診した結果です。"
               "行を選ぶと、その物件の詳細へ移動します。")
 
@@ -118,50 +132,5 @@ with tab_result:
             "最も多い支店を機械的に割り当てています。正確な支店が分かったら直してください。",
             icon=":material/info:")
 
-# ══ 担当者 ═════════════════════════════════════════════════
-with tab_person:
+with st.expander("担当者を横断で見る"):
     render_persons("bank")
-
-# ══ 記録する ═══════════════════════════════════════════════
-with tab_add:
-    st.caption("打診した結果を物件と銀行に紐づけて記録します。")
-    props_all = query("""
-        select id, name, excel_row from re_properties
-        where name is not null order by reply_date desc nulls last, excel_row desc
-    """)
-    banks = query("""
-        select o.id, c.name || '　' || coalesce(o.branch_name,'') as label
-        from re_offices o join re_companies c on c.id=o.company_id
-        where 'bank' = any(c.kinds)
-        order by (select count(*) from re_interactions i where i.office_id=o.id) desc,
-                 c.name, o.branch_name
-    """)
-    with st.form("add_inquiry"):
-        c = st.columns([3, 3, 2])
-        p_label = c[0].selectbox("物件", props_all["name"].tolist())
-        b_label = c[1].selectbox("銀行・支店", banks["label"].tolist())
-        on = c[2].date_input("打診日", value=None)
-        c = st.columns([1, 5])
-        amount = c[0].number_input("融資可能額(万円)", value=None, step=100.0)
-        result = c[1].text_input("結果", placeholder="例：5000万円が限界／NG／2200万円")
-        ok = st.form_submit_button("記録する", type="primary")
-
-    if ok:
-        if not result.strip():
-            st.error("結果を入力してください。")
-        else:
-            pid = str(props_all.loc[props_all["name"] == p_label, "id"].iloc[0])
-            oid = str(banks.loc[banks["label"] == b_label, "id"].iloc[0])
-            new_i = query("""
-                insert into re_interactions (office_id, kind, occurred_on, content)
-                values (:oid, 'bank_inquiry', :on, :content) returning id
-            """, {"oid": oid, "on": on, "content": result.strip()})
-            execute("""
-                insert into re_interaction_properties
-                  (interaction_id, property_id, result, loanable_amount)
-                values (:iid, :pid, :result, :amt)
-            """, {"iid": str(new_i.iloc[0]["id"]), "pid": pid,
-                  "result": result.strip(), "amt": amount})
-            query.clear()
-            st.success("記録しました。")
-            st.rerun()
