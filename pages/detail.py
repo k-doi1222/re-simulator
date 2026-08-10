@@ -30,8 +30,16 @@ RAW_COLS = """
     has_elevator, has_septic_tank, free_internet, hazard,
     legal_useful_life, bank_offered_rate, scenario_label,
     coalesce(legal_useful_life, re_useful_life_by_structure(structure)) as useful_life,
-    re_target_price(id, 150) as target150,
-    re_target_price(id, 200) as target200
+    -- 目標判定に乗せる価格は100万円刻み。丸めた分だけ目標を上回るので、
+    -- 減額幅ではなく「その価格でのCF基準」を見せる。
+    (select price         from re_target_price_detail(id, 150)) as t150_price,
+    (select discount_rate from re_target_price_detail(id, 150)) as t150_rate,
+    (select cf_mark || cf_value::text
+       from re_target_price_detail(id, 150))                    as t150_cf,
+    (select price         from re_target_price_detail(id, 200)) as t200_price,
+    (select discount_rate from re_target_price_detail(id, 200)) as t200_rate,
+    (select cf_mark || cf_value::text
+       from re_target_price_detail(id, 200))                    as t200_cf
 """
 
 # 計算関数に渡す入力値。どちらのSQLでも同じ列名で使う。
@@ -193,16 +201,16 @@ def render_summary():
                 f'<div class="{val_cls}">{value}</div>'
                 f'<div class="tp-pills">{ps}</div></div>')
 
-    def target_card(label, price):
-        """目標判定に乗せる価格。あくまで目安なので控えめに出す。"""
+    def target_card(label, price, rate, cf):
+        """目標判定に乗せる価格。100万円刻みに切り下げているので、
+        減額幅ではなく「その価格での実際のCF基準」を添える。目安なので控えめに出す。"""
         if price is None or price <= 0:
             card(label, "到達不可", sub=True)
         elif price >= purchase_price:
             card(label, f"{purchase_price:,.0f} 万円", ["現価格で到達"], sub=True)
         else:
-            off = purchase_price - price
             card(label, f"{price:,.0f} 万円",
-                 [discount_pill(price), f"▲{off:,.0f} 万円"], sub=True)
+                 [f"↓{rate:.1f}% 指値", f"CF{cf}"], sub=True)
 
     # 主役（判定・価格・築年数・積算比率）は同じ大きさで左に、
     # 目安の到達価格は右に控えめに置く。見た目を揃えるため主役も card() で描く。
@@ -226,9 +234,11 @@ def render_summary():
     with c[5]:
         card("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
     with c[6]:
-        target_card("△150 にする指値後価格", num(prop["target150"]))
+        target_card("△150 にする指値後価格", num(prop["t150_price"]),
+                    num(prop["t150_rate"]), txt(prop["t150_cf"]))
     with c[7]:
-        target_card("○200 にする指値後価格", num(prop["target200"]))
+        target_card("○200 にする指値後価格", num(prop["t200_price"]),
+                    num(prop["t200_rate"]), txt(prop["t200_cf"]))
 
     st.caption(f"到達価格は販売価格を基準に算出　／　"
               f"構造 {txt(prop['structure']) or '未設定'}・法定耐用年数 {prop['useful_life']:.0f}年"
