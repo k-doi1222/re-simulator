@@ -78,6 +78,15 @@ def ratio(label=None, **kw):
     return st.column_config.NumberColumn(label, format="percent", **kw)
 
 
+def percent1(label=None, **kw):
+    """%を小数第1位まで揃えて出す。値は**100倍したもの**を渡すこと。
+
+    `format="percent"` は値によって小数の桁数が変わる（11.26% と 86.3% が混在する）。
+    利回りのように桁を揃えたいものはこちらを使う。
+    """
+    return st.column_config.NumberColumn(label, format="%.1f%%", **kw)
+
+
 def count(label=None, unit="", **kw):
     """件数・年数などの整数。"""
     return st.column_config.NumberColumn(label, format=f"%d{unit}", **kw)

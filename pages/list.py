@@ -9,7 +9,7 @@ import streamlit as st
 from auth import require_password
 from db import execute, query, refresh_calc_cache
 from nav import goto_property
-from theme import compact_css, count, longtext, money, ratio
+from theme import compact_css, count, longtext, money, percent1, ratio
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
 # 一覧に出す計算値は re_property_calc_cache から読む。
@@ -86,6 +86,8 @@ def occupancy(occ, total):
 
 
 view["入居状況"] = [occupancy(o, t) for o, t in zip(view["入居数"], view["戸数"])]
+# 利回りは桁を揃えて小数第1位まで出したいので、100倍して percent1 に渡す
+view["満室利回り"] = view["満室利回"] * 100
 
 
 def one_line(s):
@@ -103,8 +105,11 @@ def one_line(s):
 for col in ["物件名", "所在地", "メモ・コメント", "状況", "cf基準"]:
     view[col] = one_line(view[col])
 
-COLS = ["状況", "登録日付", "物件名", "所在地", "cf基準", "到達150", "到達200",
-        "築年数", "価格", "入居状況", "積算比率", "メモ・コメント"]
+# 判定（CF基準）のすぐ右に、その判定を左右する値（築年数・価格・利回り）を並べる。
+# 目標到達価格は目安なのでその後ろ。
+COLS = ["状況", "登録日付", "物件名", "所在地", "cf基準",
+        "築年数", "価格", "満室利回り", "到達150", "到達200",
+        "入居状況", "積算比率", "メモ・コメント"]
 
 filtered = len(df) < len(all_df)
 count_text = (f"{len(df):,} 件（全 {len(all_df):,} 件中）" if filtered else f"{len(df):,} 件")
@@ -138,12 +143,15 @@ with st.container(key="fulltable"):
             "物件名":     st.column_config.TextColumn("物件名", width="medium"),
             "所在地":     st.column_config.TextColumn("所在地", width="medium"),
             "cf基準":     st.column_config.TextColumn("CF基準", width="small"),
-            "到達150":    money("△150にする価格",
+            # 見出しは短くして幅を稼ぐ。意味はツールチップに残す
+            "到達150":    money("△150",
                                help="判定を△150に乗せるための指値後価格（基準は販売価格）"),
-            "到達200":    money("○200にする価格",
+            "到達200":    money("○200",
                                help="判定を○200に乗せるための指値後価格（基準は販売価格）"),
             "築年数":     count("築年数", " 年"),
             "価格":       money("価格", help="指値後価格。未入力なら販売価格"),
+            "満室利回り": percent1("満室利回り",
+                                   help="満室想定の年収 ÷ 価格。空室があっても満室として計算した利回り"),
             "入居状況":   st.column_config.TextColumn("入居状況", width="small",
                                                       help="入居数 / 総戸数"),
             "積算比率":   ratio("積算比率"),
