@@ -15,7 +15,7 @@ import streamlit as st
 
 from auth import require_password
 from db import execute, query
-from theme import CALC_BG, compact_css, count, longtext, money, ratio
+from theme import CALC_BG, compact_css, count, money, ratio
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
 compact_css()
@@ -366,22 +366,30 @@ def render_memo():
 def render_interactions():
     """この物件について誰と何を話したかを、種別ごとに分けて出す。"""
     st.markdown("#### この物件について話したこと")
-    # 会社名は拠点名（「ニッシー可児支店」等）に含まれるので、この画面では出さない。
     # 担当者は1回の接触に複数人いることがあるので ' / ' で連ねる。
     # 名寄せできなかった相手は person_name_raw に原文が残っているのでそれを使う。
     hist = query("""
         select i.kind,
                i.occurred_on as 日付,
-               o.branch_name as 拠点,
-               (select string_agg(coalesce(p.name, ipe.person_name_raw), ' / ')
-                  from re_interaction_persons ipe
-                  left join re_persons p on p.id = ipe.person_id
-                 where ipe.interaction_id = i.id) as 担当者,
+               c.name as 会社, o.branch_name as 拠点,
+               coalesce(
+                 (select string_agg(coalesce(p.name, ipe.person_name_raw), ' / ')
+                    from re_interaction_persons ipe
+                    left join re_persons p on p.id = ipe.person_id
+                   where ipe.interaction_id = i.id),
+                 -- 銀行打診は元Excelが「支店単位」の記録で、誰と話したかまで残っていない。
+                 -- 接触に紐づく人がいないときは、その支店の現任担当者で代える。
+                 (select string_agg(pe.name, ' / ')
+                    from re_persons pe
+                   where pe.office_id = i.office_id
+                     and coalesce(pe.is_current, true))
+               ) as 担当者,
                ip.loanable_amount as 融資可能額,
                coalesce(ip.result, i.content) as 内容
         from re_interaction_properties ip
         join re_interactions i on i.id = ip.interaction_id
         join re_offices o on o.id = i.office_id
+        join re_companies c on c.id = o.company_id
         where ip.property_id = :pid
         order by i.occurred_on desc nulls last
     """, {"pid": str(prop["id"])})
@@ -392,32 +400,46 @@ def render_interactions():
         hist["日付"] = (pd.to_datetime(hist["日付"], errors="coerce")
                         .dt.strftime("%Y-%m-%d").fillna(""))
         hist["融資可能額"] = pd.to_numeric(hist["融資可能額"], errors="coerce")
-        for col in ["拠点", "担当者", "内容"]:
+        for col in ["会社", "拠点", "担当者", "内容"]:
             hist[col] = hist[col].fillna("").astype(str)
 
-    groups = [("bank_inquiry", "銀行打診", True),
-              ("rental_hearing", "賃貸ヒアリング", False),
-              ("sales_contact", "売買仲介とのやりとり", False)]
+    # 種別ごとに見たいものが違う。
+    # - 銀行打診：どの銀行のどの支店の誰が何と言ったか。会社名（銀行名）まで要る
+    # - 賃貸ヒアリング：拠点名に会社名が入っている（「ニッシー可児支店」等）ので会社は省く。
+    #   内容が主役なので、他の列は必要最小限の幅に固定して残りを全部内容に回す
+    # - 売買仲介：詳しいやりとりは仲介業者側のメモに書くので、ここは
+    #   「誰から情報をもらったか」だけ。同じ相手の重複は畳む
+    groups = [("bank_inquiry", "銀行打診", ["会社", "拠点", "担当者", "融資可能額", "内容"], False),
+              ("rental_hearing", "賃貸ヒアリング", ["日付", "拠点", "担当者", "内容"], False),
+              ("sales_contact", "売買仲介とのやりとり", ["会社", "拠点", "担当者"], True)]
+
+    # 内容以外は幅を決め打ちにする。最後の列は幅を指定せず、余りを全部使わせる。
+    WIDTH = {"日付": 100, "会社": 220, "拠点": 220, "担当者": 110, "融資可能額": 120}
+
     shown_any = False
-    for kind, label, with_amount in groups:
+    for kind, label, cols, dedupe in groups:
         part = hist[hist["kind"] == kind]
         if part.empty:
             continue
-        shown_any = True
-        st.caption(f"{label}　{len(part)} 件")
-        cols = ["日付", "拠点", "担当者"] + (["融資可能額"] if with_amount else []) + ["内容"]
         # 1件も値がない列は出さない。融資可能額は現状139件すべて空で、
         # 空の列があるだけで表が読みにくくなる。値が入れば自動でまた出る。
-        cols = [c for c in cols if part[c].notna().any()
+        # notna は数値列（NaN）用、空文字判定は文字列列用。両方見ないと取りこぼす
+        cols = [c for c in cols
+                if part[c].notna().any()
                 and (part[c].astype(str).str.strip() != "").any()]
-        st.dataframe(part[cols], width="stretch", hide_index=True,
-                    column_config={
-                        "日付": st.column_config.TextColumn("日付", width="small"),
-                        "拠点": st.column_config.TextColumn("拠点", width="medium"),
-                        "担当者": st.column_config.TextColumn("担当者", width="small"),
-                        "融資可能額": money("融資可能額"),
-                        "内容": longtext("内容"),
-                    })
+        part = part[cols]
+        if dedupe:
+            part = part.drop_duplicates()
+        shown_any = True
+        st.caption(f"{label}　{len(part)} 件")
+        def col_conf(c, is_last):
+            if c == "融資可能額":
+                return money(c)
+            # 最後の列は幅を指定しない＝余った幅をここが全部もらう
+            return st.column_config.TextColumn(c, width=None if is_last else WIDTH[c])
+
+        conf = {c: col_conf(c, c == cols[-1]) for c in cols}
+        st.dataframe(part, width="stretch", hide_index=True, column_config=conf)
 
     if not shown_any:
         st.caption("この物件についての打診・ヒアリングの記録はまだありません。")
