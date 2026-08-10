@@ -36,33 +36,35 @@ with st.form("new_property"):
     src = c[3].selectbox("紹介元", office_opts,
                          help="この物件を持ってきてくれた仲介業者")
 
+    # 金額・面積・年収は整数、路線価は小数第1位、係数は%で入力してもらう
     c = st.columns(5)
     structure = c[0].selectbox("構造", structures)
     built_date = c[1].date_input("建築日", value=None, min_value=datetime.date(1950, 1, 1))
-    price = c[2].number_input("販売価格(万円)", value=None, step=10.0)
-    nego = c[3].number_input("指値後価格(万円)", value=None, step=10.0,
+    price = c[2].number_input("販売価格(万円)", value=None, step=10.0, format="%.0f")
+    nego = c[3].number_input("指値後価格(万円)", value=None, step=10.0, format="%.0f",
                              help="空欄なら販売価格をそのまま使います")
     rate = c[4].number_input("銀行提示金利", value=None, step=0.001, format="%.3f",
                              help="空欄なら標準の1.5%で計算")
 
     c = st.columns(6)
-    land = c[0].number_input("土地面積(㎡)", value=None, step=1.0)
-    floor = c[1].number_input("延床面積(㎡)", value=None, step=1.0)
-    road = c[2].number_input("路線価(実)", value=None, step=0.1, help="空欄なら 1.0")
+    land = c[0].number_input("土地面積(㎡)", value=None, step=1.0, format="%.0f")
+    floor = c[1].number_input("延床面積(㎡)", value=None, step=1.0, format="%.0f")
+    road = c[2].number_input("路線価(実)", value=None, step=0.1, format="%.1f",
+                             help="空欄なら 1.0")
     zoning = c[3].text_input("用途地域")
-    zcoef = c[4].number_input("用途地域係数", value=1.0, step=0.05,
-                              help="商業110 近商105 住居100 準工80 工業70")
-    scoef = c[5].number_input("土地形状係数", value=1.0, step=0.05)
+    zcoef_pct = c[4].number_input("用途地域係数(%)", value=100, step=5, format="%d",
+                                  help="商業110 近商105 住居100 準工80 工業70")
+    scoef_pct = c[5].number_input("土地形状係数(%)", value=100, step=5, format="%d")
 
     c = st.columns(6)
-    full_income = c[0].number_input("満室年収(万円)", value=None, step=1.0)
-    curr_income = c[1].number_input("現況年収(万円)", value=None, step=1.0)
-    tax = c[2].number_input("固都税・実(万円)", value=None, step=1.0,
+    full_income = c[0].number_input("満室年収(万円)", value=None, step=1.0, format="%.0f")
+    curr_income = c[1].number_input("現況年収(万円)", value=None, step=1.0, format="%.0f")
+    tax = c[2].number_input("固都税・実(万円)", value=None, step=1.0, format="%.0f",
                             help="空欄なら建物評価から自動で仮計算")
-    extra = c[3].number_input("EV費等の追加(万円)", value=None, step=1.0,
+    extra = c[3].number_input("EV費等の追加(万円)", value=None, step=1.0, format="%.0f",
                               help="CATV・インターネット・浄化槽の維持費などの年額")
-    occ = c[4].number_input("入居戸数", value=None, step=1.0)
-    total = c[5].number_input("総戸数", value=None, step=1.0)
+    occ = c[4].number_input("入居戸数", value=None, step=1.0, format="%.0f")
+    total = c[5].number_input("総戸数", value=None, step=1.0, format="%.0f")
 
     c = st.columns(6)
     park = c[0].number_input("駐車場(台)", value=None, step=1.0)
@@ -111,7 +113,10 @@ if submitted:
             "name": name.strip(), "address": z(address), "reply_date": reply_date,
             "structure": structure, "built_date": built_date, "zoning": z(zoning),
             "price": price, "nego": nego, "land": land, "floor": floor,
-            "zcoef": zcoef, "scoef": scoef, "road": road,
+            # 係数は画面では%で入力してもらうので、保存時に100で割って元に戻す
+            "zcoef": None if zcoef_pct is None else zcoef_pct / 100,
+            "scoef": None if scoef_pct is None else scoef_pct / 100,
+            "road": road,
             "full_income": full_income, "curr_income": curr_income,
             "occ": occ, "total": total, "tax": tax, "extra": extra,
             "park": park, "expark": z(expark), "ev": z(ev), "septic": z(septic),

@@ -271,10 +271,10 @@ def render_calc_detail(ar, row):
             g2 = st.columns(6)
             g2[0].metric("満室時CF", f"{row['c_bs']:,.0f}" if pd.notna(row["c_bs"]) else "—")
             g2[1].metric("現況CF", f"{row['c_bv']:,.0f}" if pd.notna(row["c_bv"]) else "—")
-            g2[2].metric("満室年収", f"{num(prop['full_income']) or 0:,.0f}")
-            g2[3].metric("現況年収", f"{num(prop['current_income']) or 0:,.0f}")
-            g2[4].metric("土地面積", f"{num(prop['land_area']) or 0:,.0f} ㎡")
-            g2[5].metric("延床面積", f"{num(prop['floor_area']) or 0:,.0f} ㎡")
+            g2[2].metric("返済比率", f"{row['c_cb'] * 100:.0f}%" if pd.notna(row["c_cb"]) else "—")
+            g2[3].metric("管理費率", f"{row['c_dg']:.1f}%" if pd.notna(row["c_dg"]) else "—")
+            g2[4].metric("収益還元評価", f"{row['c_cn']:,.0f}" if pd.notna(row["c_cn"]) else "—")
+            g2[5].metric("7年後積算", f"{row['c_dm']:,.0f}" if pd.notna(row["c_dm"]) else "—")
 
 
 def render_memo():
@@ -404,40 +404,54 @@ def render_edit_form():
         f_expark = c[7].text_input("敷地外駐車場", txt(prop["external_parking"]))
 
         # AL / AM / AR / AU / AW ＋ 構造
+        # 金額・面積・年収は整数で表示する（format は見た目だけを変え、値は保持される）。
+        # 路価実は小数第1位まで。係数は %（100倍）で入力してもらい、保存時に戻す。
         c = st.columns(6)
         cur_st = txt(prop["structure"])
         f_struct = c[0].selectbox("構造", structures,
                                   index=structures.index(cur_st) if cur_st in structures else 0)
         f_built = c[1].date_input("建築日", day(prop["built_date"]),
                                   min_value=datetime.date(1950, 1, 1))
-        f_price = c[2].number_input("販売価格(万円)", value=num(prop["purchase_price"]), step=10.0)
+        f_price = c[2].number_input("販売価格(万円)", value=num(prop["purchase_price"]),
+                                    step=10.0, format="%.0f")
         f_nego = c[3].number_input("指値後物件価格(万円)", value=num(prop["negotiated_price"]),
-                                   step=10.0)
-        f_road = c[4].number_input("路価実", value=num(prop["road_price_actual"]), step=0.1,
-                                   help="空欄なら 1.0 として計算")
-        f_tax = c[5].number_input("固税実(万円)", value=num(prop["property_tax"]), step=1.0,
+                                   step=10.0, format="%.0f")
+        f_road = c[4].number_input("路価実", value=num(prop["road_price_actual"]),
+                                   step=0.1, format="%.1f", help="空欄なら 1.0 として計算")
+        f_tax = c[5].number_input("固税実(万円)", value=num(prop["property_tax"]),
+                                  step=1.0, format="%.0f",
                                   help="空欄なら建物評価から自動で仮計算")
 
         # AX / AY / AZ / BA / BC
         c = st.columns(5)
-        f_land = c[0].number_input("土地面積(㎡)", value=num(prop["land_area"]), step=1.0)
+        f_land = c[0].number_input("土地面積(㎡)", value=num(prop["land_area"]),
+                                   step=1.0, format="%.0f")
         f_zoning = c[1].text_input("用途地域", txt(prop["zoning"]))
-        f_zcoef = c[2].number_input("用途地域係数", value=num(prop["zone_coef"]), step=0.05,
-                                    help="商業110 近商105 住居100 準工80 工業70")
-        f_scoef = c[3].number_input("土地形状係数", value=num(prop["shape_coef"]), step=0.05)
-        f_floor = c[4].number_input("延床面積(㎡)", value=num(prop["floor_area"]), step=1.0)
+        zc, sc = num(prop["zone_coef"]), num(prop["shape_coef"])
+        f_zcoef_pct = c[2].number_input("用途地域係数(%)",
+                                        value=None if zc is None else round(zc * 100),
+                                        step=5, format="%d",
+                                        help="商業110 近商105 住居100 準工80 工業70")
+        f_scoef_pct = c[3].number_input("土地形状係数(%)",
+                                        value=None if sc is None else round(sc * 100),
+                                        step=5, format="%d")
+        f_floor = c[4].number_input("延床面積(㎡)", value=num(prop["floor_area"]),
+                                    step=1.0, format="%.0f")
 
         # BD / BE / BH ＋ 計算の前提
         c = st.columns(5)
-        f_full = c[0].number_input("満室年収(万円)", value=num(prop["full_income"]), step=1.0)
-        f_curr = c[1].number_input("現況年収(万円)", value=num(prop["current_income"]), step=1.0)
-        f_extra = c[2].number_input("EV費等の追加(万円)", value=num(prop["extra_cost"]), step=1.0,
+        f_full = c[0].number_input("満室年収(万円)", value=num(prop["full_income"]),
+                                   step=1.0, format="%.0f")
+        f_curr = c[1].number_input("現況年収(万円)", value=num(prop["current_income"]),
+                                   step=1.0, format="%.0f")
+        f_extra = c[2].number_input("EV費等の追加(万円)", value=num(prop["extra_cost"]),
+                                    step=1.0, format="%.0f",
                                     help="CATV・インターネット・浄化槽の維持費などの年額")
         f_rate = c[3].number_input("銀行提示金利", value=num(prop["bank_offered_rate"]),
                                    step=0.001, format="%.3f",
                                    help="例：0.02（2.0%）。空欄なら標準の1.5%で計算")
         f_life = c[4].number_input("耐用年数の上書き(年)", value=num(prop["legal_useful_life"]),
-                                   step=1.0,
+                                   step=1.0, format="%.0f",
                                    help=f"通常は空欄。空欄なら構造から自動で {prop['useful_life']:.0f} 年")
 
         saved = st.form_submit_button("物件情報を保存", type="primary")
@@ -457,7 +471,10 @@ def render_edit_form():
             "purchase_price": f_price, "negotiated_price": f_nego,
             "road_price_actual": f_road, "property_tax": f_tax,
             "land_area": f_land, "zoning": blank_to_none(f_zoning),
-            "zone_coef": f_zcoef, "shape_coef": f_scoef, "floor_area": f_floor,
+            # 係数は画面では%で入力してもらうので、保存時に100で割って元に戻す
+            "zone_coef": None if f_zcoef_pct is None else f_zcoef_pct / 100,
+            "shape_coef": None if f_scoef_pct is None else f_scoef_pct / 100,
+            "floor_area": f_floor,
             "full_income": f_full, "current_income": f_curr, "extra_cost": f_extra,
             "bank_offered_rate": f_rate, "legal_useful_life": f_life,
             "scenario_label": blank_to_none(f_label),
