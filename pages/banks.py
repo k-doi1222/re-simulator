@@ -8,7 +8,7 @@ import streamlit as st
 from auth import require_password
 from db import execute, query
 from nav import goto_property
-from partners import render_persons
+from partners import render_office_jump_panel, render_persons
 from theme import compact_css, count, longtext, money
 
 require_password()
@@ -31,6 +31,10 @@ m[1].metric("接触済み", f"{stat['接触済']:,}",
             f"未接触 {stat['支店総数'] - stat['接触済']:,}", delta_color="off")
 m[2].metric("融資条件を聞けた", f"{stat['条件聴取済']:,}")
 m[3].metric("担当者を把握", f"{stat['担当者把握']:,}")
+
+# 物件詳細から「この相手先を直す」で来たときは、タブの外に編集欄を出す
+# （Streamlit はタブを自動で開けないため）
+render_office_jump_panel("bank")
 
 tab_list, tab_result, tab_person, tab_add = st.tabs(
     ["支店を探す", "打診の結果", "担当者", "記録する"])

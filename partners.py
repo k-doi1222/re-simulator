@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from db import execute, query
-from nav import goto_property
+from nav import goto_property, render_back_to_property, take_office_edit
 from theme import count, longtext, money
 
 
@@ -182,17 +182,52 @@ def render_persons(company_kind: str) -> None:
     st.dataframe(sh, width="stretch", hide_index=True,
                 column_config={"接触回数": count("接触回数")})
 
-    render_person_editor(company_kind)
+    # 物件詳細から飛んできたときは画面の上に出しているので、ここでは重ねて出さない
+    if not _jump_office(company_kind):
+        render_person_editor(company_kind)
 
 
-def render_person_editor(company_kind: str) -> None:
+def _jump_office(company_kind: str) -> str | None:
+    """物件詳細から「この相手先を直す」で来た拠点。この種別のものでなければ None。"""
+    oid = take_office_edit()
+    if not oid:
+        return None
+    ok = query("""
+        select 1 from re_offices o join re_companies c on c.id = o.company_id
+        where o.id = cast(:oid as uuid) and :ckind = any(c.kinds)
+    """, {"oid": oid, "ckind": company_kind})
+    return oid if not ok.empty else None
+
+
+def render_office_jump_panel(company_kind: str) -> None:
+    """物件詳細から飛んできたときだけ、画面の一番上に編集欄を出す。
+
+    タブの中に置いても Streamlit はタブを自動で開けないので、
+    飛んできたときはタブの外に出す。
+    """
+    oid = _jump_office(company_kind)
+    if not oid:
+        return
+    with st.container(border=True):
+        c = st.columns([2, 6])
+        with c[0]:
+            render_back_to_property()
+        c[1].caption("物件詳細から来ています。直し終えたら左のボタンで戻れます。")
+        render_person_editor(company_kind, preset_office_id=oid, expanded=True)
+
+
+def render_person_editor(company_kind: str, preset_office_id: str | None = None,
+                         expanded: bool = False) -> None:
     """担当者を直す。
 
     人を消したり名前を上書きしたりはしない。異動は
     「前任を異動済にして、後任へ succeeded_by でつなぐ」形で残す。
     こうしないと、前任と話した過去の接触記録が後任の記録に化けてしまう。
+
+    preset_office_id を渡すと、その拠点を選んだ状態で開く
+    （物件詳細から「この相手先を直す」で飛んできたとき用）。
     """
-    with st.expander("担当者を直す（追加・修正・異動）"):
+    with st.expander("担当者を直す（追加・修正・異動）", expanded=expanded):
         offices = query("""
             select o.id, c.name || '　' || coalesce(o.branch_name, '') as label
             from re_offices o
@@ -204,8 +239,17 @@ def render_person_editor(company_kind: str) -> None:
             st.info("拠点がまだ登録されていません。")
             return
 
-        label = st.selectbox("拠点", offices["label"].tolist(),
-                             key=f"pe_off_{company_kind}",
+        labels = offices["label"].tolist()
+        key = f"pe_off_{company_kind}"
+        # 指定された拠点は「1回だけ」選び直す。毎回上書きすると、
+        # 画面上で別の拠点に切り替えられなくなる。
+        applied = f"{key}_applied"
+        if preset_office_id and st.session_state.get(applied) != str(preset_office_id):
+            hit = offices.index[offices["id"].astype(str) == str(preset_office_id)]
+            if len(hit):
+                st.session_state[key] = offices.at[hit[0], "label"]
+                st.session_state[applied] = str(preset_office_id)
+        label = st.selectbox("拠点", labels, key=key,
                              help="入力すると絞り込めます")
         oid = str(offices.loc[offices["label"] == label, "id"].iloc[0])
 

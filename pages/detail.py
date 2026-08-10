@@ -15,6 +15,7 @@ import streamlit as st
 
 from auth import require_password
 from db import execute, query
+from nav import goto_office_edit
 from theme import CALC_BG, compact_css, count, money, ratio
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
@@ -369,7 +370,7 @@ def render_interactions():
     # 担当者は1回の接触に複数人いることがあるので ' / ' で連ねる。
     # 名寄せできなかった相手は person_name_raw に原文が残っているのでそれを使う。
     hist = query("""
-        select i.kind,
+        select i.kind, o.id as office_id,
                i.occurred_on as 日付,
                c.name as 会社, o.branch_name as 拠点,
                coalesce(
@@ -409,15 +410,19 @@ def render_interactions():
     #   内容が主役なので、他の列は必要最小限の幅に固定して残りを全部内容に回す
     # - 売買仲介：詳しいやりとりは仲介業者側のメモに書くので、ここは
     #   「誰から情報をもらったか」だけ。同じ相手の重複は畳む
-    groups = [("bank_inquiry", "銀行打診", ["会社", "拠点", "担当者", "融資可能額", "内容"], False),
-              ("rental_hearing", "賃貸ヒアリング", ["日付", "拠点", "担当者", "内容"], False),
-              ("sales_contact", "売買仲介とのやりとり", ["会社", "拠点", "担当者"], True)]
+    # 4つめは「相手先の種別」。行を選んだときに、どの取引先画面へ飛ぶかを決める。
+    groups = [("bank_inquiry", "銀行打診", ["会社", "拠点", "担当者", "融資可能額", "内容"],
+               False, "bank"),
+              ("rental_hearing", "賃貸ヒアリング", ["日付", "拠点", "担当者", "内容"],
+               False, "rental_agency"),
+              ("sales_contact", "売買仲介とのやりとり", ["会社", "拠点", "担当者"],
+               True, "sales_broker")]
 
     # 内容以外は幅を決め打ちにする。最後の列は幅を指定せず、余りを全部使わせる。
     WIDTH = {"日付": 100, "会社": 220, "拠点": 220, "担当者": 110, "融資可能額": 120}
 
     shown_any = False
-    for kind, label, cols, dedupe in groups:
+    for kind, label, cols, dedupe, ckind in groups:
         part = hist[hist["kind"] == kind]
         if part.empty:
             continue
@@ -427,11 +432,11 @@ def render_interactions():
         cols = [c for c in cols
                 if part[c].notna().any()
                 and (part[c].astype(str).str.strip() != "").any()]
-        part = part[cols]
+        part = part[cols + ["office_id"]]
         if dedupe:
             part = part.drop_duplicates()
         shown_any = True
-        st.caption(f"{label}　{len(part)} 件")
+        st.caption(f"{label}　{len(part)} 件　—　行を選ぶと相手先の担当者を直せます")
         def col_conf(c, is_last):
             if c == "融資可能額":
                 return money(c)
@@ -439,7 +444,14 @@ def render_interactions():
             return st.column_config.TextColumn(c, width=None if is_last else WIDTH[c])
 
         conf = {c: col_conf(c, c == cols[-1]) for c in cols}
-        st.dataframe(part, width="stretch", hide_index=True, column_config=conf)
+        conf["office_id"] = None  # 飛び先を持たせるだけの列。画面には出さない
+        ev = st.dataframe(part, width="stretch", hide_index=True, column_config=conf,
+                          on_select="rerun", selection_mode="single-row",
+                          key=f"hist_{kind}_{prop['id']}")
+        rows = ev.selection.rows
+        if rows:
+            # 戻り先を渡しておくと、直したあと「← 物件詳細に戻る」で帰ってこられる
+            goto_office_edit(part.iloc[rows[0]]["office_id"], ckind, str(prop["id"]))
 
     if not shown_any:
         st.caption("この物件についての打診・ヒアリングの記録はまだありません。")

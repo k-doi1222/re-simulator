@@ -6,14 +6,18 @@
 import streamlit as st
 
 from auth import require_password
-from partners import (render_add_interaction, render_history, render_offices,
-                      render_persons)
+from partners import (render_add_interaction, render_history,
+                      render_office_jump_panel, render_offices, render_persons)
 from theme import compact_css
 
 require_password()
 compact_css()
 
 st.markdown("### 売買仲介")
+
+# 物件詳細から「この相手先を直す」で来たときは、タブの外に編集欄を出す
+# （Streamlit はタブを自動で開けないため）
+render_office_jump_panel("sales_broker")
 
 tab_co, tab_hist, tab_person, tab_add = st.tabs(
     ["会社・拠点", "やりとり", "担当者", "記録する"])
