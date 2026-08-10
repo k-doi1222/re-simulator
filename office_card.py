@@ -409,21 +409,22 @@ def _interactions_block(company_kind: str, office_id: str) -> None:
         hist["日付"] = _dstr(hist["日付"])
         hist = _blank(hist, ["場所", "内容", "相手", "物件"])
 
-        # 種別はこのカルテ内で全部同じなので列には出さない（見出しに出ている）
-        cols = ["日付", "相手", "場所", "内容", "物件"]
+        # 種別はこのカルテ内で全部同じなので列には出さない（見出しに出ている）。
+        # 「どの物件の話か」は場所より先に知りたいので、相手のすぐ隣に置く。
+        # 内容が主役なので最後に置き、幅を指定せず残りを全部使わせる。
+        cols = ["日付", "相手", "物件", "場所", "内容"]
         edited = st.data_editor(
             hist[cols], width="stretch", hide_index=True,
             key=f"ix_ed_{office_id}",
             column_config={
                 "日付": st.column_config.TextColumn(
-                    "日付", width=110,
+                    "日付", width=95,
                     help="2026-08-01 のように入れます。空欄にすると日付なしになります"),
-                "種別": st.column_config.TextColumn("種別", disabled=True, width=110),
-                "相手": st.column_config.TextColumn("相手", disabled=True, width=120,
+                "相手": st.column_config.TextColumn("相手", disabled=True, width=95,
                                                     help="下の「相手を付け替える」で変えられます"),
-                "場所": st.column_config.TextColumn("場所", width=120),
+                "物件": st.column_config.TextColumn("物件", disabled=True, width=170),
+                "場所": st.column_config.TextColumn("場所", width=105),
                 "内容": st.column_config.TextColumn("内容"),
-                "物件": st.column_config.TextColumn("物件", disabled=True, width=160),
             })
         edit_cols = ["日付", "場所", "内容"]
         changed = _changed(edited[edit_cols], hist[edit_cols])
