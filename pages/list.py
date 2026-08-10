@@ -28,16 +28,20 @@ statuses = query("select status, description, row_color from re_property_statuse
 STATUS_LIST = statuses["status"].tolist()
 COLOR_OF = dict(zip(statuses["status"], statuses["row_color"]))
 
+# 決着がついた物件は既定では出さない。見たいときは「状況で絞る」に足す。
+CLOSED = ("終了", "一旦断念")
+DEFAULT_STATUS = [s for s in STATUS_LIST if s not in CLOSED]
+
 # ── 絞り込み ────────────────────────────────────────────────
-# re_properties_v は1行ごとに計算関数を呼ぶので、DBからは「最新版かどうか」だけで取得し、
 # 状況・判定・キーワードの絞り込みは手元で行う。全体件数と表示件数の両方を出せる。
 c1, c2, c3, c4 = st.columns([2, 3, 3, 3])
 with c1:
     latest_only = st.toggle("最新版のみ", value=True,
                             help="同じ物件の別バージョンを畳んで、1物件1行で表示します")
 with c2:
-    f_status = st.multiselect("状況で絞る", STATUS_LIST, default=[],
-                              help="空のままなら全部表示します")
+    f_status = st.multiselect("状況で絞る", STATUS_LIST, default=DEFAULT_STATUS,
+                              help="はじめは「終了」「一旦断念」を外してあります。"
+                                   "空にすると全部表示します")
 with c3:
     marks = st.multiselect("CF基準で絞る", ["◎", "○", "△", "×", "判定なし"], default=[])
 with c4:
@@ -51,7 +55,7 @@ all_df = query("""
            "メモ", "仲介業者コメント", "構造", "満室利回", "実質cf", "紹介元会社"
     from re_properties_v
     where (not :latest_only or "最新版")
-    order by "実質cf" desc nulls last
+    order by "登録日付" asc nulls last
 """, {"latest_only": latest_only})
 
 df = all_df
