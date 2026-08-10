@@ -228,7 +228,7 @@ def render_summary():
     with c[2]:
         card("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
     with c[3]:
-        card("満室利回", f"{row['c_bq'] * 100:.2f}%" if pd.notna(row["c_bq"]) else "—")
+        card("満室利回り", f"{row['c_bq'] * 100:.1f}%" if pd.notna(row["c_bq"]) else "—")
     with c[4]:
         card("入居状況", occ_text)
     with c[5]:
@@ -250,12 +250,12 @@ def render_calc_detail(ar, row):
     """判定まわりの計算値。要点に入りきらないものはここに畳んでおく。"""
     if row is None:
         return
-    # 上の要点に出しているもの（CF基準・満室利回）はここでは繰り返さない
+    # 上の要点に出しているもの（CF基準・満室利回り）はここでは繰り返さない
     with st.container(key="calc_block"):
         m = st.columns(4)
         m[0].metric("実質CF", f"{row['c_bt']:,.0f} 万円" if pd.notna(row["c_bt"]) else "—")
         m[1].metric("積算評価", f"{row['c_bo']:,.0f} 万円" if pd.notna(row["c_bo"]) else "—")
-        m[2].metric("現況利回", f"{row['c_br'] * 100:.2f}%" if pd.notna(row["c_br"]) else "—")
+        m[2].metric("現況利回り", f"{row['c_br'] * 100:.1f}%" if pd.notna(row["c_br"]) else "—")
         m[3].metric("年間返済額", f"{row['c_cd']:,.0f} 万円" if pd.notna(row["c_cd"]) else "—")
 
     # 上に出しているもの（築年数・積算評価・現況利回・年間返済）はここでは繰り返さない
@@ -474,22 +474,22 @@ def render_versions():
     st.caption("同じ物件の前提違い・時点違いを横に並べています。")
     cmp = query("""
         select "版", "元excel行", "販売価格", "指値後価格", "満室利回",
-               "積算比率", "実質cf", "cf判定", "返信日付"
+               "積算比率", "実質cf", "cf基準", "返信日付"
         from re_properties_v
         where "物件グループ" = :gid
         order by "元excel行"
     """, {"gid": str(prop["group_id"])})
     cmp_styled = cmp.style.set_properties(
-        subset=["満室利回", "積算比率", "実質cf", "cf判定"],
+        subset=["満室利回", "積算比率", "実質cf", "cf基準"],
         **{"background-color": CALC_BG})
     st.dataframe(cmp_styled, width="stretch", hide_index=True,
                 column_config={
                     "販売価格": money("販売価格"),
                     "指値後価格": money("指値後価格"),
-                    "満室利回": ratio("満室利回"),
+                    "満室利回": ratio("満室利回り"),
                     "積算比率": ratio("積算比率"),
                     "実質cf": money("実質CF"),
-                    "cf判定": st.column_config.TextColumn("判定"),
+                    "cf基準": st.column_config.TextColumn("CF基準"),
                 })
 
 

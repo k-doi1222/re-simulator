@@ -22,7 +22,7 @@ def office_overview(kind: str) -> pd.DataFrame:
         with 紹介実績 as (
             select p.source_office_id as office_id,
                    count(*) as 紹介数,
-                   count(*) filter (where left(v."cf判定",1) in ('◎','○','△')) as 検討値
+                   count(*) filter (where left(v."cf基準",1) in ('◎','○','△')) as 検討値
             from re_properties p
             join re_properties_v v on v.id = p.id
             where p.source_office_id is not null

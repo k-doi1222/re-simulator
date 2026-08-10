@@ -19,9 +19,9 @@ st.markdown("### 分析")
 # ── 全体像 ──────────────────────────────────────────────────
 ov = query("""
     select count(*) as 物件数,
-           count(*) filter (where left("cf判定",1) in ('◎','○','△')) as 検討値,
-           count(*) filter (where left("cf判定",1) = '×') as 見送り,
-           count(*) filter (where "cf判定" is null) as 判定なし
+           count(*) filter (where left("cf基準",1) in ('◎','○','△')) as 検討値,
+           count(*) filter (where left("cf基準",1) = '×') as 見送り,
+           count(*) filter (where "cf基準" is null) as 判定なし
     from re_properties_v where "最新版"
 """).iloc[0]
 
@@ -39,7 +39,7 @@ left, right = st.columns(2)
 with left:
     st.markdown("#### 判定の分布")
     dist = query("""
-        select coalesce(left("cf判定",1),'判定なし') as 判定, count(*) as 件数
+        select coalesce(left("cf基準",1),'判定なし') as 判定, count(*) as 件数
         from re_properties_v where "最新版" group by 1
     """)
     order = ["◎", "○", "△", "×", "判定なし"]
@@ -60,7 +60,7 @@ with right:
     st.markdown("#### 月別の流入")
     flow = query("""
         select to_char("返信日付",'YYYY-MM') as 月, count(*) as 物件数,
-               count(*) filter (where left("cf判定",1) in ('◎','○','△')) as 検討値
+               count(*) filter (where left("cf基準",1) in ('◎','○','△')) as 検討値
         from re_properties_v where "返信日付" is not null group by 1 order by 1
     """)
     melted = flow.melt("月", var_name="区分", value_name="件数")
@@ -81,8 +81,8 @@ st.caption("量ではなく質を見る表です。紹介数が多くても検�
 src = query("""
     select co.name as 紹介元会社, o.branch_name as 拠点,
            count(*) as 紹介数,
-           count(*) filter (where left(v."cf判定",1) in ('◎','○','△')) as 検討値,
-           round(avg(v."満室利回")*100, 2) as 平均満室利回,
+           count(*) filter (where left(v."cf基準",1) in ('◎','○','△')) as 検討値,
+           round(avg(v."満室利回")*100, 1) as 平均満室利回り,
            round(avg(v."積算比率"), 2) as 平均積算比率,
            max(p.reply_date) as 直近の紹介
     from re_properties p
@@ -105,7 +105,7 @@ st.dataframe(shown, width="stretch", hide_index=True,
                 "検討値": count("うち◎○△"),
                 "当たり率": st.column_config.ProgressColumn(format="percent",
                                                             min_value=0, max_value=1),
-                "平均満室利回": st.column_config.NumberColumn(format="%.2f%%"),
+                "平均満室利回り": st.column_config.NumberColumn(format="%.1f%%"),
                 "平均積算比率": st.column_config.NumberColumn(format="%.2f"),
             })
 
@@ -113,8 +113,8 @@ st.dataframe(shown, width="stretch", hide_index=True,
 st.markdown("#### 構造別")
 byst = query("""
     select "構造", "法定耐用年数" as 耐用年数, count(*) as 件数,
-           count(*) filter (where left("cf判定",1) in ('◎','○','△')) as 検討値,
-           round(avg("満室利回")*100, 2) as 平均満室利回,
+           count(*) filter (where left("cf基準",1) in ('◎','○','△')) as 検討値,
+           round(avg("満室利回")*100, 1) as 平均満室利回り,
            -- 築年数は double precision なので round(x, 桁) を使うには numeric へ変換が要る
            round(avg("築年数")::numeric, 1) as 平均築年数
     from re_properties_v where "最新版"
@@ -125,6 +125,6 @@ st.dataframe(byst, width="stretch", hide_index=True,
                 "件数": count("件数"),
                 "検討値": count("うち◎○△"),
                 "耐用年数": count("耐用年数", " 年"),
-                "平均満室利回": st.column_config.NumberColumn(format="%.2f%%"),
+                "平均満室利回り": st.column_config.NumberColumn(format="%.1f%%"),
                 "平均築年数": st.column_config.NumberColumn(format="%.1f 年"),
             })
