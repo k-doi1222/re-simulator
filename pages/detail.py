@@ -1,7 +1,7 @@
 """物件詳細 — UC-2 指値の逆算、UC-3 版の比較、物件情報の編集
 
 1画面で眺めて編集できるよう縦に詰めて並べる。並びは
-  シミュレーション → メモ・コメント → 話したこと → 物件情報（元Excelの列順）
+  シミュレーション → メモ・コメント → 業者とのやりとり → 物件情報（元Excelの列順）
 版の比較だけは物件が複数版を持つときにタブで分ける。
 
 「実質CF ÷ 指値後価格」は指値後価格に対して単調に動く（価格を下げるほど良くなる）。
@@ -9,6 +9,8 @@ PMT・税金などの計算式そのものはすべてSQL側の re_calc_property
 2点だけ実際に評価してもらい、そこから「判定値150/200に乗る価格」を代数で解く。
 """
 import datetime
+import re
+import uuid
 
 import pandas as pd
 import streamlit as st
@@ -26,7 +28,7 @@ compact_css()
 
 RAW_COLS = """
     p.id, p.excel_row, p.name, p.name_raw, p.address, p.structure, p.reply_date,
-    p.zoning, p.status,
+    p.zoning, p.status, p.source_office_id,
     p.memo, p.input_memo, p.broker_comment, p.bank_inquiry_result,
     p.contact_method, p.inquiry_channel,
     p.purchase_price, p.negotiated_price, p.land_area, p.road_price_actual,
@@ -256,9 +258,12 @@ def render_summary():
         target_card("○200 にする指値後価格", num(prop["t200_price"]),
                     num(prop["t200_rate"]), txt(prop["t200_cf"]))
 
+    # 元Excel行は移行してきた物件だけが持つ。この画面から登録した物件は空なので、
+    # 「元Excel None行目」と出ないよう、あるときだけ添える。
+    origin = (f"　／　元Excel {prop['excel_row']:.0f}行目"
+              if pd.notna(prop["excel_row"]) else "")
     st.caption(f"構造 {txt(prop['structure']) or '未設定'}"
-              f"・法定耐用年数 {prop['useful_life']:.0f}年"
-              f"　／　元Excel {prop['excel_row']}行目")
+              f"・法定耐用年数 {prop['useful_life']:.0f}年" + origin)
     return ar, row
 
 
@@ -376,9 +381,234 @@ def render_memo():
         st.rerun()
 
 
+# ── 業者とのやりとり ────────────────────────────────────────
+# 接触の種別 → （取引先の種別, DBの kind）。
+# 取引先を種別で絞るのは、1社が銀行と売買仲介を兼ねる実データがあるため
+# （絞らないと銀行の選択肢に仲介業者がずらりと混ざる）。
+ADD_KINDS = [("銀行打診", "bank", "bank_inquiry"),
+             ("賃貸ヒアリング", "rental_agency", "rental_hearing"),
+             ("売買仲介とのやりとり", "sales_broker", "sales_contact")]
+NEW_ENTRY = "＋ ここに無い先を新しく登録する"
+
+
+def render_source_office():
+    """紹介元（この物件を持ってきてくれた業者）。値が無くても欄は出す。
+
+    登録画面では選べるのに、あとから直す場所がどこにも無かった。
+    候補は売買仲介・賃貸仲介に絞る（登録画面と同じ。銀行は物件を紹介してこない）。
+    """
+    offices = query("""
+        select o.id, c.name || '　' || coalesce(o.branch_name, '') as label
+        from re_offices o
+        join re_companies c on c.id = o.company_id
+        where 'sales_broker' = any(c.kinds) or 'rental_agency' = any(c.kinds)
+        order by c.name, o.branch_name
+    """)
+    none_label = "（未設定）"
+    opts = [none_label] + offices["label"].tolist()
+    cur_id = txt(prop["source_office_id"])
+    hit = offices.index[offices["id"].astype(str) == cur_id]
+    cur_label = offices.at[hit[0], "label"] if len(hit) else none_label
+
+    c = st.columns([5, 1, 4], vertical_alignment="bottom")
+    sel = c[0].selectbox("紹介元（この物件を持ってきてくれた業者）", opts,
+                         index=opts.index(cur_label), key=f"src_{prop['id']}",
+                         help="ここに無い先は、下の「やりとり・打診を記録する」で登録できます")
+    with c[1]:
+        if st.button("保存", width="stretch", key=f"src_save_{prop['id']}",
+                     disabled=(sel == cur_label)):
+            oid = (None if sel == none_label
+                   else str(offices.loc[offices["label"] == sel, "id"].iloc[0]))
+            execute("""
+                update re_properties
+                   set source_office_id = cast(:oid as uuid), updated_at = now()
+                 where id = :id
+            """, {"oid": oid, "id": str(prop["id"])})
+            st.rerun()
+
+
+def render_add_interaction():
+    """この画面から、やりとり・打診を手で足す。
+
+    会社・拠点・担当者もその場で作れるようにしてある。取引先を新規登録する画面が
+    アプリのどこにも無く、未登録の相手については何も記録できなかったため。
+
+    種別・会社・拠点の選択は **フォームの外** に置く。st.form の中の選択は
+    送信するまで反映されないので、「会社を選ぶ→その会社の拠点が出る」が動かない。
+    """
+    pid = str(prop["id"])
+    with st.expander("＋ やりとり・打診を記録する"):
+        c = st.columns([2, 3, 3])
+        label = c[0].selectbox("種別", [k[0] for k in ADD_KINDS], key=f"ak_{pid}")
+        _, ckind, kind_db = next(k for k in ADD_KINDS if k[0] == label)
+
+        comps = query("select c.id, c.name from re_companies c "
+                      "where :ckind = any(c.kinds) order by c.name", {"ckind": ckind})
+        # 「新しく登録する」は選択肢の**先頭**に置く。末尾だと会社が100件以上あって
+        # スクロールしないと見えず、あることに気づけない。初期選択は先頭の会社にする。
+        # キーに種別・会社を混ぜているのは、選択肢が総入れ替えになったときに
+        # 前の選択が残っていると Streamlit が「選択肢に無い」で落ちるため。
+        comp_opts = [NEW_ENTRY] + comps["name"].tolist()
+        comp = c[1].selectbox("会社", comp_opts, index=min(1, len(comp_opts) - 1),
+                              key=f"ac_{pid}_{ckind}")
+        new_company = comp == NEW_ENTRY
+
+        comp_id, office_id = None, None
+        if new_company:
+            c[2].caption("会社名・拠点名は下の欄に入れてください。")
+        else:
+            comp_id = str(comps.loc[comps["name"] == comp, "id"].iloc[0])
+            offs = query("""
+                select o.id, coalesce(o.branch_name, '（拠点名なし）') as label
+                from re_offices o where o.company_id = cast(:cid as uuid)
+                order by o.branch_name
+            """, {"cid": comp_id})
+            off_opts = [NEW_ENTRY] + offs["label"].tolist()
+            off = c[2].selectbox("拠点・支店", off_opts, index=min(1, len(off_opts) - 1),
+                                 key=f"ao_{pid}_{comp_id}")
+            if off != NEW_ENTRY:
+                office_id = str(offs.loc[offs["label"] == off, "id"].iloc[0])
+
+        # 担当者の候補は拠点が決まっているときだけ引ける。
+        ppl = (query("""
+                select id, name from re_persons
+                where office_id = cast(:oid as uuid) and coalesce(is_current, true)
+                  and name is not null
+                order by name
+            """, {"oid": office_id}) if office_id else None)
+
+        # 記録できたら入力欄を空に戻す。**キーごと作り替える**のが確実で、
+        # session_state から消す方法では form の中の値が残った（実測）。
+        # 空にするのは記録できたときだけ。入力漏れで弾かれたときに消えると書き直しになる。
+        seq = st.session_state.get(f"aseq_{pid}", 0)
+        k = lambda name: f"a{name}_{pid}_{seq}"  # noqa: E731
+
+        with st.form(f"addix_{pid}", border=False):
+            f_comp = f_branch = None
+            if new_company:
+                cc = st.columns(2)
+                f_comp = cc[0].text_input("会社名 *", placeholder="例：〇〇不動産",
+                                          key=k("cname"))
+                f_branch = cc[1].text_input("拠点・支店名", placeholder="例：名古屋支店",
+                                            key=k("bname"))
+            elif office_id is None:
+                f_branch = st.text_input("拠点・支店名", placeholder="例：名古屋支店",
+                                         key=k("bname"), help=f"{comp} に新しい拠点を作ります")
+
+            c = st.columns([2, 2, 4])
+            a_on = c[0].date_input("日付", value=datetime.date.today(), key=k("on"))
+            a_loc = c[1].text_input("場所", key=k("loc"))
+            if ppl is not None and not ppl.empty:
+                # 拠点を切り替えると選択肢が総入れ替えになる。前の選択が残っていると
+                # 「選択肢に無い値」で落ちるので、キーに拠点も混ぜる。
+                a_who = c[2].multiselect("担当者", ppl["name"].tolist(),
+                                         key=f"{k('who')}_{office_id}")
+            else:
+                a_who = []
+                c[2].text_input("担当者", value="", disabled=True,
+                                help="この拠点にはまだ担当者がいません。右の欄で登録できます")
+
+            c = st.columns([4, 2])
+            a_new_who = c[0].text_input("担当者を新しく登録", key=k("new"),
+                                        placeholder="例：山田太郎、鈴木花子",
+                                        help="「、」か「,」で区切ると複数登録します")
+            # 融資可能額は銀行打診のときだけ。他の種別では書く場所が無い方が迷わない。
+            a_amt = (c[1].number_input("融資可能額（万円）", value=None, step=100.0,
+                                       format="%.0f", key=k("amt"))
+                     if kind_db == "bank_inquiry" else None)
+
+            a_content = st.text_area("内容 *", height=110, key=k("con"))
+            ok = st.form_submit_button("記録する", type="primary")
+
+        if not ok:
+            return
+
+        missing = ([] if a_content.strip() else ["内容"]) + \
+                  (["会社名"] if new_company and not (f_comp or "").strip() else [])
+        if missing:
+            st.error("　".join(missing) + " を入力してください。")
+            return
+
+        if new_company:
+            cname = f_comp.strip()
+            # 同じ会社が別の種別で既に居ることがある（売買と賃貸を兼ねる先が7社ある）。
+            # 表記ゆれを吸収する re_name_key で見て、居たら二重登録せず種別を足す。
+            dup = query("select id from re_companies where name_key = re_name_key(:n)",
+                        {"n": cname})
+            if dup.empty:
+                comp_id = str(uuid.uuid4())
+                execute("""
+                    insert into re_companies (id, name, name_key, kinds)
+                    values (cast(:id as uuid), :name, re_name_key(:name), array[:k])
+                """, {"id": comp_id, "name": cname, "k": ckind})
+            else:
+                comp_id = str(dup.iloc[0]["id"])
+                execute("""
+                    update re_companies set kinds = array_append(kinds, :k),
+                           updated_at = now()
+                     where id = cast(:id as uuid) and not (:k = any(kinds))
+                """, {"id": comp_id, "k": ckind})
+        if office_id is None:
+            office_id = str(uuid.uuid4())
+            execute("""
+                insert into re_offices (id, company_id, branch_name)
+                values (cast(:id as uuid), cast(:cid as uuid), :b)
+            """, {"id": office_id, "cid": comp_id, "b": blank_to_none(f_branch)})
+
+        iid = str(uuid.uuid4())
+        execute("""
+            insert into re_interactions (id, office_id, kind, occurred_on, location, content)
+            values (cast(:id as uuid), cast(:oid as uuid), :k, :on, :loc, :content)
+        """, {"id": iid, "oid": office_id, "k": kind_db, "on": a_on,
+              "loc": blank_to_none(a_loc), "content": a_content.strip()})
+
+        # 選んだ担当者 ＋ 新しく入れた担当者。新しい人は re_persons に作る。
+        # person_name_raw に文字列で置くこともできるが、それだと取引先カルテの
+        # 担当者一覧に出てこず、次に選ぶこともできない。
+        person_ids = ([str(ppl.loc[ppl["name"] == n, "id"].iloc[0]) for n in a_who]
+                      if a_who else [])
+        for nm in re.split(r"[、,]", a_new_who or ""):
+            nm = nm.strip()
+            if not nm:
+                continue
+            # 同じ拠点に同名が既に居たら作らない。名前を打ち直して記録するたびに
+            # 同じ人が増えていくのを防ぐ。
+            same = (ppl.loc[ppl["name"] == nm, "id"] if ppl is not None
+                    else pd.Series(dtype=object))
+            if len(same):
+                person_ids.append(str(same.iloc[0]))
+                continue
+            new_pid = str(uuid.uuid4())
+            execute("""
+                insert into re_persons (id, office_id, name)
+                values (cast(:id as uuid), cast(:oid as uuid), :n)
+            """, {"id": new_pid, "oid": office_id, "n": nm})
+            person_ids.append(new_pid)
+        person_ids = list(dict.fromkeys(person_ids))   # 選択と入力で重複したら1つに
+        for person_id in person_ids:
+            execute("""
+                insert into re_interaction_persons (id, interaction_id, person_id)
+                values (cast(:id as uuid), cast(:iid as uuid), cast(:pid as uuid))
+            """, {"id": str(uuid.uuid4()), "iid": iid, "pid": person_id})
+
+        # result（物件ごとの結果）は入れない。上の履歴は coalesce(result, content) で
+        # content に落ちるので空でも表示される。移行データのように content の写しを
+        # 作ると、あとで内容を直したときに写しの側だけ古いまま残る。
+        execute("""
+            insert into re_interaction_properties
+              (id, interaction_id, property_id, property_name_raw, loanable_amount)
+            values (cast(:id as uuid), cast(:iid as uuid), cast(:pid as uuid), :raw, :amt)
+        """, {"id": str(uuid.uuid4()), "iid": iid, "pid": pid,
+              "raw": blank_to_none(txt(prop["name"])), "amt": a_amt})
+
+        st.session_state[f"aseq_{pid}"] = seq + 1   # 入力欄を作り直して空に戻す
+        st.rerun()
+
+
 def render_interactions():
-    """この物件について誰と何を話したかを、種別ごとに分けて出す。"""
-    st.markdown("#### この物件について話したこと")
+    """この物件に関わっている業者。紹介元 → 話したこと → 追加、の順に出す。"""
+    st.markdown("#### 業者とのやりとり")
+    render_source_office()
     # 担当者は1回の接触に複数人いることがあるので ' / ' で連ねる。
     # 名寄せできなかった相手は person_name_raw に原文が残っているのでそれを使う。
     hist = query("""
@@ -467,6 +697,8 @@ def render_interactions():
 
     if not shown_any:
         st.caption("この物件についての打診・ヒアリングの記録はまだありません。")
+
+    render_add_interaction()
 
     # 元Excelの原文（構造化前）。参照用に畳んでおく。
     if txt(prop["bank_inquiry_result"]):
