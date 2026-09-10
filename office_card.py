@@ -461,10 +461,15 @@ def _interactions_block(company_kind: str, office_id: str) -> None:
 
 
 def _results_block(office_id: str, ikind: str) -> None:
-    """物件ごとの結果（銀行打診の「◯◯万円まで」など）。1接触×1物件で持っている。"""
+    """物件ごとのメモ・結果（re_interaction_properties.result）。1接触×1物件で持つ。
+
+    銀行なら可否・金額、賃貸・売買なら「その物件についての所感」など、
+    やりとりのうち物件ごとに分けて残したいこと。融資可能額は銀行のときだけ出す。
+    """
+    is_bank = ikind == "bank_inquiry"
     res = query("""
         select ip.id, coalesce(pr.name, ip.property_name_raw) as 物件,
-               i.occurred_on as 日付, ip.result as 結果, ip.loanable_amount as 融資可能額
+               i.occurred_on as 日付, ip.result as メモ結果, ip.loanable_amount as 融資可能額
         from re_interaction_properties ip
         join re_interactions i on i.id = ip.interaction_id
         left join re_properties pr on pr.id = ip.property_id
@@ -473,35 +478,38 @@ def _results_block(office_id: str, ikind: str) -> None:
     """, {"oid": office_id, "ikind": ikind})
     if res.empty:
         return
-    res = _blank(res, ["物件", "結果"])
+    res = _blank(res, ["物件", "メモ結果"])
     res["日付"] = _dstr(res["日付"])
     res["融資可能額"] = pd.to_numeric(res["融資可能額"], errors="coerce")
 
-    with st.expander(f"物件ごとの結果を直す（{len(res)} 件）"):
-        st.caption("同じ相手でも物件ごとに返事が違う場合は、ここで個別に直せます。"
-                  "物件詳細の「内容」に出るのはこちらの値です。")
-        cols = ["物件", "日付", "結果", "融資可能額"]
-        edited = st.data_editor(
-            res[cols], width="stretch", hide_index=True,
-            key=f"rs_ed_{office_id}",
-            column_config={
-                "物件": st.column_config.TextColumn("物件", disabled=True, width=200),
-                "日付": st.column_config.TextColumn("日付", disabled=True, width=110),
-                "結果": st.column_config.TextColumn("結果"),
-                "融資可能額": money("融資可能額"),
-            })
-        edit_cols = ["結果", "融資可能額"]
+    with st.expander(f"物件ごとのメモ・結果（{len(res)} 件）"):
+        st.caption("やりとりのうち物件ごとに分けて残したいこと"
+                  "（銀行の可否・金額、業者の物件評価など）。"
+                  "物件詳細の「この物件についての結果・メモ」に出ます。")
+        cols = ["物件", "日付", "メモ結果"] + (["融資可能額"] if is_bank else [])
+        conf = {
+            "物件": st.column_config.TextColumn("物件", disabled=True, width=200),
+            "日付": st.column_config.TextColumn("日付", disabled=True, width=110),
+            "メモ結果": st.column_config.TextColumn("メモ・結果"),
+        }
+        if is_bank:
+            conf["融資可能額"] = money("融資可能額")
+        edited = st.data_editor(res[cols], width="stretch", hide_index=True,
+                                key=f"rs_ed_{office_id}", column_config=conf)
+        edit_cols = ["メモ結果"] + (["融資可能額"] if is_bank else [])
         changed = _changed(edited[edit_cols], res[edit_cols])
         n = int(changed.sum())
-        if st.button(f"物件ごとの結果を保存（{n} 件）", type="primary", disabled=(n == 0),
-                     key=f"rs_save_{office_id}"):
+        if st.button(f"物件ごとのメモ・結果を保存（{n} 件）", type="primary",
+                     disabled=(n == 0), key=f"rs_save_{office_id}"):
             for i in edited.index[changed]:
+                amt = _num(edited.at[i, "融資可能額"]) if is_bank \
+                    else _num(res.at[i, "融資可能額"])
                 execute("""
                     update re_interaction_properties
                        set result = :r, loanable_amount = :amt
                      where id = :id
-                """, {"id": str(res.at[i, "id"]), "r": _z(edited.at[i, "結果"]),
-                      "amt": _num(edited.at[i, "融資可能額"])})
+                """, {"id": str(res.at[i, "id"]), "r": _z(edited.at[i, "メモ結果"]),
+                      "amt": amt})
             st.success(f"{n} 件を更新しました。")
             st.rerun()
 

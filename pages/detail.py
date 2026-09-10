@@ -461,19 +461,16 @@ def _office_kind(kinds) -> str:
 
 
 def _save_interaction_content(iid: str, old: str, new: str) -> None:
-    """やりとりの「内容」を書き戻す。
+    """やりとりの「内容（相手先で共通）」＝ re_interactions.content を書き戻す。
 
     文言は2か所にある（CLAUDE.md「接触の文言は2か所にある」）。
-      re_interactions.content          … 話したこと（本体・共有）
-      re_interaction_properties.result … その接触の物件ごとの結果
-    画面の「内容」は coalesce(result, content) なので、content を直すだけでは
-    result が写しのまま残ると画面に反映されない。取引先カルテと同じく、
-    content を直したうえで「写しのままの result」だけ追随させる。
+      re_interactions.content          … 話したこと（本体・接触ごとに共有）
+      re_interaction_properties.result … その接触の物件ごとの結果・メモ
+    銀行打診は result が content の写しで作られている。写しのままのものだけ
+    content の変更に追随させ、いったん物件ごとに書き分けられた result は触らない。
     """
     execute("update re_interactions set content = :new where id = cast(:iid as uuid)",
             {"new": blank_to_none(new), "iid": iid})
-    # 写しのままの result だけ追随させる。もともと空だった（賃貸・売買や、
-    # result 未使用）ものに新しく result を作らない。
     if old.strip():
         execute("""
             update re_interaction_properties set result = :new
@@ -482,39 +479,61 @@ def _save_interaction_content(iid: str, old: str, new: str) -> None:
         """, {"new": blank_to_none(new), "iid": iid, "old": old})
 
 
-def _content_blocks(part: pd.DataFrame) -> None:
-    """表のセルに収まらない「内容」を、表の下に全文で出す。ここで編集もできる。
+def _save_interaction_result(ip_id: str, new: str) -> None:
+    """「この物件についての結果・メモ」＝ re_interaction_properties.result を書き戻す。
 
-    st.dataframe は1セル1行しか描けず、長い聞き取りメモ（賃貸ヒアリングは
-    700〜1100字ある）は畳まれてしまう。全文を text_area に出し、
-    メモ・コメントと同じように保存ボタンで書き戻す。
+    その物件の1行だけを直す（他物件・content には触れない）。
+    """
+    execute("update re_interaction_properties set result = :r where id = cast(:id as uuid)",
+            {"r": blank_to_none(new), "id": ip_id})
+
+
+def _ta_height(body: str, lo: int, hi: int) -> int:
+    """text_area の高さを中身の行数に合わせる。"""
+    return min(hi, max(lo, (body.count("\n") + 1) * 24 + 40))
+
+
+def _content_blocks(part: pd.DataFrame) -> None:
+    """やりとりの本文を表の下に全文で出す。ここで編集もできる。
+
+    2層に分けて出す（CLAUDE.md「接触の文言は2か所にある」の考え方）。
+      「この接触の内容（相手先で共通）」＝ re_interactions.content
+      「この物件についての結果・メモ」    ＝ re_interaction_properties.result
+    銀行の可否・金額、業者の物件評価など「物件ごとに分けたい話」は下段へ。
     """
     for _, r in part.iterrows():
         iid = r.get("interaction_id")
         if not iid:
             continue
-        body = str(r.get("内容", "") or "")
+        shared = str(r.get("内容共通", "") or "")
+        per_prop = str(r.get("物件結果", "") or "")
+        ip_id = str(r.get("ip_id") or "")
         head = "　".join(x for x in [str(r.get("日付", "") or ""),
                                      str(r.get("拠点", "") or r.get("会社", "") or ""),
                                      str(r.get("担当者", "") or "")] if x)
-        # 高さは中身の行数に合わせる（長い賃貸ヒアリングでも全文が見えるように）
-        height = min(600, max(100, (body.count("\n") + 1) * 24 + 40))
         others = str(r.get("他物件", "") or "").strip()
         with st.container(border=True):
-            with st.form(key=f"ixc_{iid}", border=False):
-                if head:
-                    st.caption(head)
-                new = st.text_area("内容", value=body, height=height,
-                                   label_visibility="collapsed")
+            if head:
+                st.caption(head)
+            with st.form(key=f"ixc_c_{iid}", border=False):
+                new_s = st.text_area("この接触の内容（相手先で共通）", value=shared,
+                                     height=_ta_height(shared, 100, 600))
                 if others:
-                    # この接触は複数物件にまたがる。content は共有なので、
-                    # ここで直すと他物件の詳細でも同じ本文が変わる。
+                    # content は接触ごとに共有。ここを直すと他物件の詳細でも変わる。
                     st.caption(f"⚠ この内容は {others} と共通です（直すと両方に反映）")
-                ok = st.form_submit_button("この内容を保存", type="primary")
-            if ok and new != body:
-                _save_interaction_content(str(iid), body, new)
-                st.success("保存しました。")
+                ok_s = st.form_submit_button("内容を保存", type="primary")
+            if ok_s and new_s != shared:
+                _save_interaction_content(str(iid), shared, new_s)
                 st.rerun()
+            if ip_id:
+                with st.form(key=f"ixc_r_{ip_id}", border=False):
+                    new_p = st.text_area("この物件についての結果・メモ（任意）",
+                                         value=per_prop,
+                                         height=_ta_height(per_prop, 80, 320))
+                    ok_p = st.form_submit_button("この物件の分を保存")
+                if ok_p and new_p != per_prop:
+                    _save_interaction_result(ip_id, new_p)
+                    st.rerun()
 
 
 def render_sales_brokers(sales_hist: pd.DataFrame):
@@ -840,7 +859,8 @@ def render_interactions():
                      and coalesce(pe.is_current, true))
                ) as 担当者,
                ip.loanable_amount as 融資可能額,
-               coalesce(ip.result, i.content) as 内容,
+               ip.id as ip_id,
+               i.content as 内容共通, ip.result as 物件結果,
                (select string_agg(coalesce(pr.name, x.property_name_raw), '・')
                   from re_interaction_properties x
                   left join re_properties pr on pr.id = x.property_id
@@ -859,7 +879,7 @@ def render_interactions():
         hist["日付"] = (pd.to_datetime(hist["日付"], errors="coerce")
                         .dt.strftime("%Y-%m-%d").fillna(""))
         hist["融資可能額"] = pd.to_numeric(hist["融資可能額"], errors="coerce")
-        for col in ["会社", "拠点", "担当者", "内容", "他物件"]:
+        for col in ["会社", "拠点", "担当者", "内容共通", "物件結果", "他物件"]:
             hist[col] = hist[col].fillna("").astype(str)
 
     # 種別ごとに見たいものが違う。
