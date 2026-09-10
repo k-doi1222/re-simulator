@@ -18,7 +18,7 @@ import streamlit as st
 from auth import require_password
 from db import execute, query, refresh_calc_cache
 from nav import goto_office_edit
-from theme import CALC_BG, compact_css, count, money, ratio
+from theme import CALC_BG, compact_css, money, ratio
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
 # 一覧に出す計算値は re_property_calc_cache から読む。
@@ -496,28 +496,30 @@ def render_sales_brokers():
 
     if not rows.empty:
         view = rows.copy()
-        view["最終接触"] = (pd.to_datetime(view["最終接触"], errors="coerce")
-                            .dt.strftime("%Y-%m-%d").fillna(""))
+        # 「日付」= その接触の日付。1行1接触なので「最終接触」と実質同じだが、
+        # 賃貸ヒアリングの表と列名をそろえる。
+        view["日付"] = (pd.to_datetime(view["最終接触"], errors="coerce")
+                        .dt.strftime("%Y-%m-%d").fillna(""))
         view["印"] = view["紹介元"].map(lambda b: "★" if b else "")
         for col in ["会社", "拠点", "担当者", "内容"]:
             view[col] = view[col].fillna("").astype(str)
 
-        # 値のない列は出さない（他の表と同じ扱い）。売買仲介は拠点名・最終接触が
-        # 空のことが多く、空の列があるだけで読みにくくなる。
-        base = ["印", "会社", "拠点", "担当者", "やりとり", "最終接触"]
+        # 「やりとり」件数列は出さない。実データは全56行が1件で、常に「1 件」を
+        # 表示するだけの無情報な列だった（他の2表にも無い）。
+        # 拠点・日付は値が無ければ落とす（他の表と同じ扱い）。
+        base = ["印", "日付", "会社", "拠点", "担当者"]
         cols = [c for c in base
-                if c in ("印", "会社", "担当者", "やりとり")
+                if c in ("印", "会社", "担当者")
                 or (view[c].astype(str).str.strip() != "").any()]
 
         st.caption(f"売買仲介　{len(view)} 件　—　行を選ぶと相手先の担当者を直せます"
                   "（★＝この物件の紹介元）")
         conf = {
-            "印":       st.column_config.TextColumn("紹介元", width=55),
-            "会社":     st.column_config.TextColumn("会社", width=240),
-            "拠点":     st.column_config.TextColumn("拠点", width=220),
-            "担当者":   st.column_config.TextColumn("担当者", width=160),
-            "やりとり": count("やりとり", " 件"),
-            "最終接触": st.column_config.TextColumn("最終接触", width=110),
+            "印":     st.column_config.TextColumn("紹介元", width=55),
+            "日付":   st.column_config.TextColumn("日付", width=100),
+            "会社":   st.column_config.TextColumn("会社", width=240),
+            "拠点":   st.column_config.TextColumn("拠点", width=220),
+            "担当者": st.column_config.TextColumn("担当者", width=200),
         }
         ev = st.dataframe(view[cols], width="stretch", hide_index=True,
                           column_config=conf, on_select="rerun",
