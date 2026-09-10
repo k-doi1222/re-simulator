@@ -18,7 +18,7 @@ import streamlit as st
 from auth import require_password
 from db import execute, query, refresh_calc_cache
 from nav import goto_office_edit
-from theme import CALC_BG, compact_css, count, longtext, money, ratio
+from theme import CALC_BG, compact_css, count, money, ratio
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
 # 一覧に出す計算値は re_property_calc_cache から読む。
@@ -463,12 +463,33 @@ def _office_kind(kinds) -> str:
     return "sales_broker"
 
 
+def _content_blocks(part: pd.DataFrame) -> None:
+    """表のセルに収まらない「内容」を、表の下に全文で出す。
+
+    st.dataframe は1セル1行しか描けず、長い聞き取りメモ（賃貸ヒアリングは
+    700〜1100字ある）は畳まれてしまう。読ませたい本文はここで全文を出す。
+    """
+    for _, r in part.iterrows():
+        body = str(r.get("内容", "") or "").strip()
+        if not body:
+            continue
+        head = "　".join(x for x in [str(r.get("日付", "") or ""),
+                                     str(r.get("拠点", "") or r.get("会社", "") or ""),
+                                     str(r.get("担当者", "") or "")] if x)
+        with st.container(border=True):
+            if head:
+                st.caption(head)
+            # 単独の改行も改行として見せる（markdown は行末2スペースで hard break）
+            st.markdown(body.replace("\n", "  \n"))
+
+
 def render_sales_brokers():
     """売買仲介の表。見た目は銀行打診・賃貸ヒアリングと同じ（行を選ぶと取引先カルテへ）。
 
     紹介元の指定は、この表とは分けて下の別枠（_render_source_picker）で行う。
     分ける理由は sales_broker_rows() の docstring を参照。
     表には★印だけ出して「どれが紹介元か」は分かるようにしておく。
+    「内容」は表の下に全文で出す（他の2セクションと同じ扱い）。
     """
     pid = str(prop["id"])
     rows = sales_broker_rows(pid).reset_index(drop=True)
@@ -481,9 +502,9 @@ def render_sales_brokers():
         for col in ["会社", "拠点", "担当者", "内容"]:
             view[col] = view[col].fillna("").astype(str)
 
-        # 値のない列は出さない（他の表と同じ扱い）。売買仲介は拠点名・日付・内容が
+        # 値のない列は出さない（他の表と同じ扱い）。売買仲介は拠点名・最終接触が
         # 空のことが多く、空の列があるだけで読みにくくなる。
-        base = ["印", "会社", "拠点", "担当者", "やりとり", "最終接触", "内容"]
+        base = ["印", "会社", "拠点", "担当者", "やりとり", "最終接触"]
         cols = [c for c in base
                 if c in ("印", "会社", "担当者", "やりとり")
                 or (view[c].astype(str).str.strip() != "").any()]
@@ -492,12 +513,11 @@ def render_sales_brokers():
                   "（★＝この物件の紹介元）")
         conf = {
             "印":       st.column_config.TextColumn("紹介元", width=55),
-            "会社":     st.column_config.TextColumn("会社", width=200),
-            "拠点":     st.column_config.TextColumn("拠点", width=150),
-            "担当者":   st.column_config.TextColumn("担当者", width=110),
+            "会社":     st.column_config.TextColumn("会社", width=240),
+            "拠点":     st.column_config.TextColumn("拠点", width=220),
+            "担当者":   st.column_config.TextColumn("担当者", width=160),
             "やりとり": count("やりとり", " 件"),
-            "最終接触": st.column_config.TextColumn("最終接触", width=100),
-            "内容":     longtext("内容", help="セルを開くと改行のまま読めます"),
+            "最終接触": st.column_config.TextColumn("最終接触", width=110),
         }
         ev = st.dataframe(view[cols], width="stretch", hide_index=True,
                           column_config=conf, on_select="rerun",
@@ -506,6 +526,7 @@ def render_sales_brokers():
         if r:
             row = rows.loc[r[0]]
             goto_office_edit(row["office_id"], _office_kind(row["kinds"]), pid)
+        _content_blocks(view)
     else:
         st.caption("売買仲介のやりとりの記録はまだありません。")
 
@@ -801,52 +822,42 @@ def render_interactions():
 
     # 種別ごとに見たいものが違う。
     # - 銀行打診：どの銀行のどの支店の誰が何と言ったか。会社名（銀行名）まで要る
-    # - 賃貸ヒアリング：拠点名に会社名が入っている（「ニッシー可児支店」等）ので会社は省く。
-    #   内容が主役なので、他の列は必要最小限の幅に固定して残りを全部内容に回す
-    # 売買仲介はここに入れない。紹介元と同じ相手を指すのが基本形なので、
-    # render_sales_brokers() で1つの表にまとめている。
+    # - 賃貸ヒアリング：拠点名に会社名が入っている（「ニッシー可児支店」等）ので会社は省く
+    # 「内容」は表に入れない。st.dataframe は1セル1行しか描けず、賃貸ヒアリングは
+    # 700〜1100字あって畳まれてしまうため、表の下に全文で出す（_content_blocks）。
     # 3つめは「相手先の種別」。行を選んだときに、どの取引先画面へ飛ぶかを決める。
-    groups = [("bank_inquiry", "銀行打診", ["会社", "拠点", "担当者", "融資可能額", "内容"],
-               False, "bank"),
-              ("rental_hearing", "賃貸ヒアリング", ["日付", "拠点", "担当者", "内容"],
-               False, "rental_agency")]
+    groups = [("bank_inquiry", "銀行打診", ["会社", "拠点", "担当者", "融資可能額"], "bank"),
+              ("rental_hearing", "賃貸ヒアリング", ["日付", "拠点", "担当者"], "rental_agency")]
 
-    # 内容以外は幅を決め打ちにする。最後の列は幅を指定せず、余りを全部使わせる。
-    WIDTH = {"日付": 100, "会社": 220, "拠点": 220, "担当者": 110, "融資可能額": 120}
+    WIDTH = {"日付": 100, "会社": 240, "拠点": 260, "担当者": 220, "融資可能額": 120}
 
     render_sales_brokers()
 
     shown_any = False
-    for kind, label, cols, dedupe, ckind in groups:
-        part = hist[hist["kind"] == kind]
-        if part.empty:
+    for kind, label, cols, ckind in groups:
+        src = hist[hist["kind"] == kind]
+        if src.empty:
             continue
         # 1件も値がない列は出さない。融資可能額は現状139件すべて空で、
         # 空の列があるだけで表が読みにくくなる。値が入れば自動でまた出る。
         # notna は数値列（NaN）用、空文字判定は文字列列用。両方見ないと取りこぼす
-        cols = [c for c in cols
-                if part[c].notna().any()
-                and (part[c].astype(str).str.strip() != "").any()]
-        part = part[cols + ["office_id"]]
-        if dedupe:
-            part = part.drop_duplicates()
+        vis = [c for c in cols
+               if src[c].notna().any()
+               and (src[c].astype(str).str.strip() != "").any()]
+        table = src[vis + ["office_id"]]
         shown_any = True
-        st.caption(f"{label}　{len(part)} 件　—　行を選ぶと相手先の担当者を直せます")
-        def col_conf(c, is_last):
-            if c == "融資可能額":
-                return money(c)
-            # 最後の列は幅を指定しない＝余った幅をここが全部もらう
-            return st.column_config.TextColumn(c, width=None if is_last else WIDTH[c])
-
-        conf = {c: col_conf(c, c == cols[-1]) for c in cols}
+        st.caption(f"{label}　{len(table)} 件　—　行を選ぶと相手先の担当者を直せます")
+        conf = {c: (money(c) if c == "融資可能額"
+                    else st.column_config.TextColumn(c, width=WIDTH[c])) for c in vis}
         conf["office_id"] = None  # 飛び先を持たせるだけの列。画面には出さない
-        ev = st.dataframe(part, width="stretch", hide_index=True, column_config=conf,
+        ev = st.dataframe(table, width="stretch", hide_index=True, column_config=conf,
                           on_select="rerun", selection_mode="single-row",
                           key=f"hist_{kind}_{prop['id']}")
         rows = ev.selection.rows
         if rows:
             # 戻り先を渡しておくと、直したあと「← 物件詳細に戻る」で帰ってこられる
-            goto_office_edit(part.iloc[rows[0]]["office_id"], ckind, str(prop["id"]))
+            goto_office_edit(table.iloc[rows[0]]["office_id"], ckind, str(prop["id"]))
+        _content_blocks(src)
 
     if not shown_any:
         st.caption("銀行打診・賃貸ヒアリングの記録はまだありません。")
