@@ -18,7 +18,7 @@ import streamlit as st
 from auth import require_password
 from db import execute, query, refresh_calc_cache
 from nav import goto_office_edit
-from theme import CALC_BG, compact_css, count, money, ratio
+from theme import CALC_BG, compact_css, count, longtext, money, ratio
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
 # 一覧に出す計算値は re_property_calc_cache から読む。
@@ -28,7 +28,7 @@ compact_css()
 
 RAW_COLS = """
     p.id, p.excel_row, p.name, p.name_raw, p.address, p.structure, p.reply_date,
-    p.zoning, p.status, p.source_office_id,
+    p.zoning, p.status, p.source_office_id, p.source_person_id,
     p.memo, p.input_memo, p.broker_comment, p.bank_inquiry_result,
     p.contact_method, p.inquiry_channel,
     p.purchase_price, p.negotiated_price, p.land_area, p.road_price_actual,
@@ -391,40 +391,188 @@ ADD_KINDS = [("銀行打診", "bank", "bank_inquiry"),
 NEW_ENTRY = "＋ ここに無い先を新しく登録する"
 
 
-def render_source_office():
-    """紹介元（この物件を持ってきてくれた業者）。値が無くても欄は出す。
+def sales_broker_rows(pid: str) -> pd.DataFrame:
+    """この物件の売買仲介を「1行＝1担当者」で集める。紹介元も同じ表に混ぜる。
 
-    登録画面では選べるのに、あとから直す場所がどこにも無かった。
-    候補は売買仲介・賃貸仲介に絞る（登録画面と同じ。銀行は物件を紹介してこない）。
+    DBは2つに分けて持っている。
+      紹介元  = re_properties.source_office_id / source_person_id（1物件に1つ）
+      やりとり = re_interactions(kind='sales_contact')（何件でも）
+    実データでは、両方ある47件のうち実質42件（89%）が同じ相手を指していた。
+    **基本形は「紹介元＝やりとり先」**なので、画面では1つの表にまとめて
+    どれが紹介元かを印で示す。
+
+    それでも列を分けたまま残しているのは、次の2つが理由。
+      1. 紹介元は1つに決まっていないと困る。「紹介元の質」（分析画面）、
+         「紹介数・検討値」（取引先一覧）、「関係」（取引先カルテ）の3か所が
+         1物件1紹介元を前提に集計している。1物件に売買仲介が3社つく実例があり、
+         全部を紹介元に数えると、持ってきていない物件までその業者の実績になる
+      2. やりとりの記録が無くても紹介元は分かる。紹介元が入っている144件のうち
+         93件はやりとりの記録がゼロ。やりとり側に寄せると出どころが消える
     """
-    offices = query("""
-        select o.id, c.name || '　' || coalesce(o.branch_name, '') as label
-        from re_offices o
+    return query("""
+        with ix as (
+            select i.office_id, ipe.person_id,
+                   count(*) as n, max(i.occurred_on) as last_on,
+                   string_agg(coalesce(ip.result, i.content), chr(10)
+                              order by i.occurred_on desc nulls last) as body
+            from re_interaction_properties ip
+            join re_interactions i on i.id = ip.interaction_id
+            left join re_interaction_persons ipe on ipe.interaction_id = i.id
+            where ip.property_id = cast(:pid as uuid) and i.kind = 'sales_contact'
+            group by 1, 2
+        ),
+        src as (
+            select source_office_id as office_id, source_person_id as person_id
+            from re_properties
+            where id = cast(:pid as uuid) and source_office_id is not null
+        ),
+        -- union は NULL どうしを同じ値として畳むので、担当者なしの行も重複しない。
+        -- 名前を both にしてはいけない（trim(both ...) の予約語で構文エラーになる）
+        rel as (
+            select office_id, person_id from ix
+            union
+            select office_id, person_id from src
+        )
+        select b.office_id, b.person_id, c.kinds,
+               (src.office_id is not null) as "紹介元",
+               c.name as "会社", o.branch_name as "拠点", pe.name as "担当者",
+               coalesce(ix.n, 0) as "やりとり", ix.last_on as "最終接触",
+               ix.body as "内容"
+        from rel b
+        join re_offices o on o.id = b.office_id
         join re_companies c on c.id = o.company_id
-        where 'sales_broker' = any(c.kinds) or 'rental_agency' = any(c.kinds)
-        order by c.name, o.branch_name
-    """)
-    none_label = "（未設定）"
-    opts = [none_label] + offices["label"].tolist()
-    cur_id = txt(prop["source_office_id"])
-    hit = offices.index[offices["id"].astype(str) == cur_id]
-    cur_label = offices.at[hit[0], "label"] if len(hit) else none_label
+        left join re_persons pe on pe.id = b.person_id
+        left join ix  on ix.office_id  = b.office_id
+                     and ix.person_id  is not distinct from b.person_id
+        left join src on src.office_id = b.office_id
+                     and src.person_id is not distinct from b.person_id
+        order by "紹介元" desc, ix.last_on desc nulls last, c.name
+    """, {"pid": pid})
 
-    c = st.columns([5, 1, 4], vertical_alignment="bottom")
-    sel = c[0].selectbox("紹介元（この物件を持ってきてくれた業者）", opts,
-                         index=opts.index(cur_label), key=f"src_{prop['id']}",
-                         help="ここに無い先は、下の「やりとり・打診を記録する」で登録できます")
-    with c[1]:
-        if st.button("保存", width="stretch", key=f"src_save_{prop['id']}",
-                     disabled=(sel == cur_label)):
-            oid = (None if sel == none_label
-                   else str(offices.loc[offices["label"] == sel, "id"].iloc[0]))
-            execute("""
-                update re_properties
-                   set source_office_id = cast(:oid as uuid), updated_at = now()
-                 where id = :id
-            """, {"oid": oid, "id": str(prop["id"])})
+
+def _office_kind(kinds) -> str:
+    """取引先カルテのどの画面へ飛ぶか。1社が複数の顔を持つので優先順で決める。
+
+    紹介元が銀行だった実例がある（メゾン伊賀＝三十三銀行 大垣支店）。
+    その会社は売買仲介も兼ねているので売買仲介の画面で開ける。
+    """
+    ks = list(kinds) if kinds is not None else []
+    for k in ("sales_broker", "rental_agency", "bank"):
+        if k in ks:
+            return k
+    return "sales_broker"
+
+
+def render_sales_brokers():
+    """売買仲介。紹介元とやりとりを1つの表にまとめ、紹介元は印で切り替える。"""
+    pid = str(prop["id"])
+    rows = sales_broker_rows(pid).reset_index(drop=True)
+    if rows.empty:
+        st.caption("売買仲介の記録はまだありません。"
+                  "下の「やりとり・打診を記録する」から足すと、"
+                  "最初の1件がそのまま紹介元になります。")
+        return
+
+    view = rows[["紹介元", "会社", "拠点", "担当者", "やりとり", "最終接触", "内容"]].copy()
+    view["最終接触"] = (pd.to_datetime(view["最終接触"], errors="coerce")
+                        .dt.strftime("%Y-%m-%d").fillna(""))
+    for col in ["会社", "拠点", "担当者", "内容"]:
+        view[col] = view[col].fillna("").astype(str)
+    # 1件も値がない列は出さない（他の表と同じ扱い）。売買仲介は日付も内容も
+    # 空のことが多く、空の列があるだけで表が読みにくくなる。
+    cols = [c for c in view.columns
+            if c not in ("拠点", "最終接触", "内容")
+            or (view[c].astype(str).str.strip() != "").any()]
+    view = view[cols]
+
+    st.caption(f"売買仲介　{len(view)} 件　—　"
+              "この物件を持ってきてくれた担当者に「紹介元」のチェックを入れて保存します"
+              "（別の行に入れると紹介元がそちらへ移ります）")
+    edited = st.data_editor(
+        view, width="stretch", hide_index=True, key=f"sb_{pid}",
+        disabled=[c for c in cols if c != "紹介元"],
+        column_config={
+            "紹介元": st.column_config.CheckboxColumn(
+                "紹介元", width=70,
+                help="この物件情報の出どころ。1つだけ選びます"),
+            "会社": st.column_config.TextColumn("会社", width=200),
+            "拠点": st.column_config.TextColumn("拠点", width=150),
+            "担当者": st.column_config.TextColumn("担当者", width=110),
+            "やりとり": count("やりとり", " 件"),
+            "最終接触": st.column_config.TextColumn("最終接触", width=100),
+            "内容": longtext("内容", help="セルを開くと改行のまま読めます"),
+        })
+
+    # チェックは「入れ替え」と読む。別の行に入れたら紹介元がそこへ移る。
+    # 前の行のチェックを外す手間を省くため（紹介元は1つと決まっている）。
+    # 全部外したときだけ「紹介元なし」にする。
+    picked = {i for i in edited.index if bool(edited.at[i, "紹介元"])}
+    before = {i for i in rows.index if bool(rows.at[i, "紹介元"])}
+    added = picked - before
+
+    target, changed = None, False
+    if len(added) == 1:
+        target, changed = next(iter(added)), True
+    elif len(added) > 1:
+        st.warning("紹介元は1つだけです。移したい行を1つだけ選んでください。"
+                  "同じ物件を複数の業者に問い合わせていても、"
+                  "情報の出どころは1つに決めます"
+                  "（「紹介元の質」の集計がそれを前提にしているため）。")
+    elif before and not picked:
+        changed = True   # 解除
+
+    c = st.columns([2, 3, 1.2], vertical_alignment="bottom")
+    if c[0].button("紹介元を保存", type="primary", key=f"sbsave_{pid}",
+                   disabled=not changed):
+        if target is None:
+            set_source(pid, None, None)
+        else:
+            r = rows.loc[target]
+            set_source(pid, str(r["office_id"]),
+                       None if pd.isna(r["person_id"]) else str(r["person_id"]))
+        st.rerun()
+
+    # 担当者の氏名・電話そのものは取引先カルテで直す。行の選択で飛ばすのは
+    # data_editor では使えない（選択に対応していない）ので、選ばせてから開く。
+    labels = ["—"] + [f"{r['会社']}　{txt(r['拠点'])}　{txt(r['担当者'])}".strip()
+                      for _, r in rows.iterrows()]
+    who = c[1].selectbox("担当者や電話を直す相手", labels, key=f"sbjump_{pid}")
+    if c[2].button("開く", key=f"sbopen_{pid}", disabled=(who == "—")):
+        r = rows.loc[labels.index(who) - 1]
+        goto_office_edit(r["office_id"], _office_kind(r["kinds"]), pid)
+
+    # 表に出てこない相手を紹介元にしたいとき用。やりとりの記録が無いまま
+    # 紹介元だけ分かっている物件が93件あるので、記録を作らせずに直せる道を残す。
+    with st.expander("一覧に無い業者を紹介元にする"):
+        cand = query("""
+            select o.id as office_id, pe.id as person_id,
+                   c.name || '　' || coalesce(o.branch_name, '')
+                     || coalesce('　' || pe.name, '') as label
+            from re_offices o
+            join re_companies c on c.id = o.company_id
+            left join re_persons pe on pe.office_id = o.id
+                                   and coalesce(pe.is_current, true)
+            where 'sales_broker' = any(c.kinds) or 'rental_agency' = any(c.kinds)
+            order by c.name, o.branch_name, pe.name
+        """)
+        lab = st.selectbox("紹介元にする相手", cand["label"].tolist(),
+                           key=f"sbalt_{pid}", help="入力すると絞り込めます")
+        if st.button("この相手を紹介元にする", key=f"sbaltsave_{pid}"):
+            hit = cand.loc[cand["label"] == lab].iloc[0]
+            set_source(pid, str(hit["office_id"]),
+                       None if pd.isna(hit["person_id"]) else str(hit["person_id"]))
             st.rerun()
+
+
+def set_source(pid: str, office_id: str | None, person_id: str | None) -> None:
+    """紹介元を差し替える。拠点と担当者は必ず一緒に動かす（片方だけ残すと食い違う）。"""
+    execute("""
+        update re_properties
+           set source_office_id = cast(:o as uuid),
+               source_person_id = cast(:p as uuid),
+               updated_at = now()
+         where id = cast(:id as uuid)
+    """, {"o": office_id, "p": person_id, "id": pid})
 
 
 def render_add_interaction():
@@ -601,14 +749,20 @@ def render_add_interaction():
         """, {"id": str(uuid.uuid4()), "iid": iid, "pid": pid,
               "raw": blank_to_none(txt(prop["name"])), "amt": a_amt})
 
+        # 基本形は「紹介元＝やりとり先」。紹介元がまだ空なら、いま記録した相手を
+        # そのまま紹介元にする。ここを自動にしないと、同じ業者を2か所へ手で入れる
+        # ことになり、実際に食い違いが起きていた。
+        # 既に紹介元が入っているときは触らない（問い合わせ先が増えただけかもしれない）。
+        if kind_db == "sales_contact" and not txt(prop["source_office_id"]):
+            set_source(pid, office_id, person_ids[0] if person_ids else None)
+
         st.session_state[f"aseq_{pid}"] = seq + 1   # 入力欄を作り直して空に戻す
         st.rerun()
 
 
 def render_interactions():
-    """この物件に関わっている業者。紹介元 → 話したこと → 追加、の順に出す。"""
+    """この物件に関わっている業者。売買仲介（紹介元こみ）→ 銀行・賃貸 → 追加 の順。"""
     st.markdown("#### 業者とのやりとり")
-    render_source_office()
     # 担当者は1回の接触に複数人いることがあるので ' / ' で連ねる。
     # 名寄せできなかった相手は person_name_raw に原文が残っているのでそれを使う。
     hist = query("""
@@ -650,18 +804,18 @@ def render_interactions():
     # - 銀行打診：どの銀行のどの支店の誰が何と言ったか。会社名（銀行名）まで要る
     # - 賃貸ヒアリング：拠点名に会社名が入っている（「ニッシー可児支店」等）ので会社は省く。
     #   内容が主役なので、他の列は必要最小限の幅に固定して残りを全部内容に回す
-    # - 売買仲介：詳しいやりとりは仲介業者側のメモに書くので、ここは
-    #   「誰から情報をもらったか」だけ。同じ相手の重複は畳む
-    # 4つめは「相手先の種別」。行を選んだときに、どの取引先画面へ飛ぶかを決める。
+    # 売買仲介はここに入れない。紹介元と同じ相手を指すのが基本形なので、
+    # render_sales_brokers() で1つの表にまとめている。
+    # 3つめは「相手先の種別」。行を選んだときに、どの取引先画面へ飛ぶかを決める。
     groups = [("bank_inquiry", "銀行打診", ["会社", "拠点", "担当者", "融資可能額", "内容"],
                False, "bank"),
               ("rental_hearing", "賃貸ヒアリング", ["日付", "拠点", "担当者", "内容"],
-               False, "rental_agency"),
-              ("sales_contact", "売買仲介とのやりとり", ["会社", "拠点", "担当者"],
-               True, "sales_broker")]
+               False, "rental_agency")]
 
     # 内容以外は幅を決め打ちにする。最後の列は幅を指定せず、余りを全部使わせる。
     WIDTH = {"日付": 100, "会社": 220, "拠点": 220, "担当者": 110, "融資可能額": 120}
+
+    render_sales_brokers()
 
     shown_any = False
     for kind, label, cols, dedupe, ckind in groups:
@@ -696,7 +850,7 @@ def render_interactions():
             goto_office_edit(part.iloc[rows[0]]["office_id"], ckind, str(prop["id"]))
 
     if not shown_any:
-        st.caption("この物件についての打診・ヒアリングの記録はまだありません。")
+        st.caption("銀行打診・賃貸ヒアリングの記録はまだありません。")
 
     render_add_interaction()
 
