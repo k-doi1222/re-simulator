@@ -464,104 +464,103 @@ def _office_kind(kinds) -> str:
 
 
 def render_sales_brokers():
-    """売買仲介。紹介元とやりとりを1つの表にまとめ、紹介元は印で切り替える。"""
+    """売買仲介の表。見た目は銀行打診・賃貸ヒアリングと同じ（行を選ぶと取引先カルテへ）。
+
+    紹介元の指定は、この表とは分けて下の別枠（_render_source_picker）で行う。
+    分ける理由は sales_broker_rows() の docstring を参照。
+    表には★印だけ出して「どれが紹介元か」は分かるようにしておく。
+    """
     pid = str(prop["id"])
     rows = sales_broker_rows(pid).reset_index(drop=True)
-    if rows.empty:
-        st.caption("売買仲介の記録はまだありません。"
-                  "下の「やりとり・打診を記録する」から足すと、"
-                  "最初の1件がそのまま紹介元になります。")
-        return
 
-    view = rows[["紹介元", "会社", "拠点", "担当者", "やりとり", "最終接触", "内容"]].copy()
-    view["最終接触"] = (pd.to_datetime(view["最終接触"], errors="coerce")
-                        .dt.strftime("%Y-%m-%d").fillna(""))
-    for col in ["会社", "拠点", "担当者", "内容"]:
-        view[col] = view[col].fillna("").astype(str)
-    # 1件も値がない列は出さない（他の表と同じ扱い）。売買仲介は日付も内容も
-    # 空のことが多く、空の列があるだけで表が読みにくくなる。
-    cols = [c for c in view.columns
-            if c not in ("拠点", "最終接触", "内容")
-            or (view[c].astype(str).str.strip() != "").any()]
-    view = view[cols]
+    if not rows.empty:
+        view = rows.copy()
+        view["最終接触"] = (pd.to_datetime(view["最終接触"], errors="coerce")
+                            .dt.strftime("%Y-%m-%d").fillna(""))
+        view["印"] = view["紹介元"].map(lambda b: "★" if b else "")
+        for col in ["会社", "拠点", "担当者", "内容"]:
+            view[col] = view[col].fillna("").astype(str)
 
-    st.caption(f"売買仲介　{len(view)} 件　—　"
-              "この物件を持ってきてくれた担当者に「紹介元」のチェックを入れて保存します"
-              "（別の行に入れると紹介元がそちらへ移ります）")
-    edited = st.data_editor(
-        view, width="stretch", hide_index=True, key=f"sb_{pid}",
-        disabled=[c for c in cols if c != "紹介元"],
-        column_config={
-            "紹介元": st.column_config.CheckboxColumn(
-                "紹介元", width=70,
-                help="この物件情報の出どころ。1つだけ選びます"),
-            "会社": st.column_config.TextColumn("会社", width=200),
-            "拠点": st.column_config.TextColumn("拠点", width=150),
-            "担当者": st.column_config.TextColumn("担当者", width=110),
+        # 値のない列は出さない（他の表と同じ扱い）。売買仲介は拠点名・日付・内容が
+        # 空のことが多く、空の列があるだけで読みにくくなる。
+        base = ["印", "会社", "拠点", "担当者", "やりとり", "最終接触", "内容"]
+        cols = [c for c in base
+                if c in ("印", "会社", "担当者", "やりとり")
+                or (view[c].astype(str).str.strip() != "").any()]
+
+        st.caption(f"売買仲介　{len(view)} 件　—　行を選ぶと相手先の担当者を直せます"
+                  "（★＝この物件の紹介元）")
+        conf = {
+            "印":       st.column_config.TextColumn("紹介元", width=55),
+            "会社":     st.column_config.TextColumn("会社", width=200),
+            "拠点":     st.column_config.TextColumn("拠点", width=150),
+            "担当者":   st.column_config.TextColumn("担当者", width=110),
             "やりとり": count("やりとり", " 件"),
             "最終接触": st.column_config.TextColumn("最終接触", width=100),
-            "内容": longtext("内容", help="セルを開くと改行のまま読めます"),
-        })
+            "内容":     longtext("内容", help="セルを開くと改行のまま読めます"),
+        }
+        ev = st.dataframe(view[cols], width="stretch", hide_index=True,
+                          column_config=conf, on_select="rerun",
+                          selection_mode="single-row", key=f"sb_{pid}")
+        r = ev.selection.rows
+        if r:
+            row = rows.loc[r[0]]
+            goto_office_edit(row["office_id"], _office_kind(row["kinds"]), pid)
+    else:
+        st.caption("売買仲介のやりとりの記録はまだありません。")
 
-    # チェックは「入れ替え」と読む。別の行に入れたら紹介元がそこへ移る。
-    # 前の行のチェックを外す手間を省くため（紹介元は1つと決まっている）。
-    # 全部外したときだけ「紹介元なし」にする。
-    picked = {i for i in edited.index if bool(edited.at[i, "紹介元"])}
-    before = {i for i in rows.index if bool(rows.at[i, "紹介元"])}
-    added = picked - before
+    _render_source_picker(pid)
 
-    target, changed = None, False
-    if len(added) == 1:
-        target, changed = next(iter(added)), True
-    elif len(added) > 1:
-        st.warning("紹介元は1つだけです。移したい行を1つだけ選んでください。"
-                  "同じ物件を複数の業者に問い合わせていても、"
-                  "情報の出どころは1つに決めます"
-                  "（「紹介元の質」の集計がそれを前提にしているため）。")
-    elif before and not picked:
-        changed = True   # 解除
 
-    c = st.columns([2, 3, 1.2], vertical_alignment="bottom")
-    if c[0].button("紹介元を保存", type="primary", key=f"sbsave_{pid}",
-                   disabled=not changed):
-        if target is None:
+def _render_source_picker(pid: str) -> None:
+    """紹介元（この物件を持ってきてくれた業者）を別枠で指定する。
+
+    候補は担当者単位。やりとりの記録が無い相手も選べる
+    （紹介元だけ分かっている物件が実データで93件あるため）。
+    1社が銀行と売買仲介を兼ねる実例があり（メゾン伊賀＝三十三銀行 大垣支店）、
+    そういう会社も候補に出る。
+    """
+    cur_office = txt(prop["source_office_id"])
+    cur_person = txt(prop["source_person_id"])
+
+    cand = query("""
+        select o.id::text as office_id, pe.id::text as person_id,
+               c.name || '　' || coalesce(o.branch_name, '')
+                 || case when pe.name is not null then '　' || pe.name
+                         else '　（担当者未指定）' end as label
+        from re_offices o
+        join re_companies c on c.id = o.company_id
+        left join re_persons pe on pe.office_id = o.id
+             and (coalesce(pe.is_current, true)
+                  or pe.id = cast(nullif(:cur_person, '') as uuid))
+        where 'sales_broker' = any(c.kinds) or 'rental_agency' = any(c.kinds)
+        order by c.name, o.branch_name nulls first, pe.name nulls first
+    """, {"cur_person": cur_person})
+
+    NONE = "（未設定）"
+    opts = [NONE] + cand["label"].tolist()
+
+    cur_label = NONE
+    if cur_office:
+        m = cand[(cand["office_id"] == cur_office)
+                 & (cand["person_id"].fillna("") == cur_person)]
+        if not m.empty:
+            cur_label = m.iloc[0]["label"]
+
+    st.markdown("**紹介元（この物件を持ってきてくれた業者）**")
+    c = st.columns([6, 1], vertical_alignment="bottom")
+    sel = c[0].selectbox(
+        "紹介元にする担当者", opts, index=opts.index(cur_label),
+        key=f"src_{pid}", label_visibility="collapsed",
+        help="この物件情報の出どころ。1つだけ。やりとりの記録が無い相手も選べます")
+    if c[1].button("保存", key=f"src_save_{pid}", disabled=(sel == cur_label)):
+        if sel == NONE:
             set_source(pid, None, None)
         else:
-            r = rows.loc[target]
-            set_source(pid, str(r["office_id"]),
-                       None if pd.isna(r["person_id"]) else str(r["person_id"]))
+            hit = cand[cand["label"] == sel].iloc[0]
+            set_source(pid, hit["office_id"],
+                       hit["person_id"] if pd.notna(hit["person_id"]) else None)
         st.rerun()
-
-    # 担当者の氏名・電話そのものは取引先カルテで直す。行の選択で飛ばすのは
-    # data_editor では使えない（選択に対応していない）ので、選ばせてから開く。
-    labels = ["—"] + [f"{r['会社']}　{txt(r['拠点'])}　{txt(r['担当者'])}".strip()
-                      for _, r in rows.iterrows()]
-    who = c[1].selectbox("担当者や電話を直す相手", labels, key=f"sbjump_{pid}")
-    if c[2].button("開く", key=f"sbopen_{pid}", disabled=(who == "—")):
-        r = rows.loc[labels.index(who) - 1]
-        goto_office_edit(r["office_id"], _office_kind(r["kinds"]), pid)
-
-    # 表に出てこない相手を紹介元にしたいとき用。やりとりの記録が無いまま
-    # 紹介元だけ分かっている物件が93件あるので、記録を作らせずに直せる道を残す。
-    with st.expander("一覧に無い業者を紹介元にする"):
-        cand = query("""
-            select o.id as office_id, pe.id as person_id,
-                   c.name || '　' || coalesce(o.branch_name, '')
-                     || coalesce('　' || pe.name, '') as label
-            from re_offices o
-            join re_companies c on c.id = o.company_id
-            left join re_persons pe on pe.office_id = o.id
-                                   and coalesce(pe.is_current, true)
-            where 'sales_broker' = any(c.kinds) or 'rental_agency' = any(c.kinds)
-            order by c.name, o.branch_name, pe.name
-        """)
-        lab = st.selectbox("紹介元にする相手", cand["label"].tolist(),
-                           key=f"sbalt_{pid}", help="入力すると絞り込めます")
-        if st.button("この相手を紹介元にする", key=f"sbaltsave_{pid}"):
-            hit = cand.loc[cand["label"] == lab].iloc[0]
-            set_source(pid, str(hit["office_id"]),
-                       None if pd.isna(hit["person_id"]) else str(hit["person_id"]))
-            st.rerun()
 
 
 def set_source(pid: str, office_id: str | None, person_id: str | None) -> None:
