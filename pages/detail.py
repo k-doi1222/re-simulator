@@ -412,9 +412,7 @@ def sales_broker_rows(pid: str) -> pd.DataFrame:
     return query("""
         with ix as (
             select i.office_id, ipe.person_id,
-                   count(*) as n, max(i.occurred_on) as last_on,
-                   string_agg(coalesce(ip.result, i.content), chr(10)
-                              order by i.occurred_on desc nulls last) as body
+                   count(*) as n, max(i.occurred_on) as last_on
             from re_interaction_properties ip
             join re_interactions i on i.id = ip.interaction_id
             left join re_interaction_persons ipe on ipe.interaction_id = i.id
@@ -436,8 +434,7 @@ def sales_broker_rows(pid: str) -> pd.DataFrame:
         select b.office_id, b.person_id, c.kinds,
                (src.office_id is not null) as "紹介元",
                c.name as "会社", o.branch_name as "拠点", pe.name as "担当者",
-               coalesce(ix.n, 0) as "やりとり", ix.last_on as "最終接触",
-               ix.body as "内容"
+               coalesce(ix.n, 0) as "やりとり", ix.last_on as "最終接触"
         from rel b
         join re_offices o on o.id = b.office_id
         join re_companies c on c.id = o.company_id
@@ -463,33 +460,72 @@ def _office_kind(kinds) -> str:
     return "sales_broker"
 
 
+def _save_interaction_content(iid: str, old: str, new: str) -> None:
+    """やりとりの「内容」を書き戻す。
+
+    文言は2か所にある（CLAUDE.md「接触の文言は2か所にある」）。
+      re_interactions.content          … 話したこと（本体・共有）
+      re_interaction_properties.result … その接触の物件ごとの結果
+    画面の「内容」は coalesce(result, content) なので、content を直すだけでは
+    result が写しのまま残ると画面に反映されない。取引先カルテと同じく、
+    content を直したうえで「写しのままの result」だけ追随させる。
+    """
+    execute("update re_interactions set content = :new where id = cast(:iid as uuid)",
+            {"new": blank_to_none(new), "iid": iid})
+    # 写しのままの result だけ追随させる。もともと空だった（賃貸・売買や、
+    # result 未使用）ものに新しく result を作らない。
+    if old.strip():
+        execute("""
+            update re_interaction_properties set result = :new
+             where interaction_id = cast(:iid as uuid)
+               and result is not distinct from :old
+        """, {"new": blank_to_none(new), "iid": iid, "old": old})
+
+
 def _content_blocks(part: pd.DataFrame) -> None:
-    """表のセルに収まらない「内容」を、表の下に全文で出す。
+    """表のセルに収まらない「内容」を、表の下に全文で出す。ここで編集もできる。
 
     st.dataframe は1セル1行しか描けず、長い聞き取りメモ（賃貸ヒアリングは
-    700〜1100字ある）は畳まれてしまう。読ませたい本文はここで全文を出す。
+    700〜1100字ある）は畳まれてしまう。全文を text_area に出し、
+    メモ・コメントと同じように保存ボタンで書き戻す。
     """
     for _, r in part.iterrows():
-        body = str(r.get("内容", "") or "").strip()
-        if not body:
+        iid = r.get("interaction_id")
+        if not iid:
             continue
+        body = str(r.get("内容", "") or "")
         head = "　".join(x for x in [str(r.get("日付", "") or ""),
                                      str(r.get("拠点", "") or r.get("会社", "") or ""),
                                      str(r.get("担当者", "") or "")] if x)
+        # 高さは中身の行数に合わせる（長い賃貸ヒアリングでも全文が見えるように）
+        height = min(600, max(100, (body.count("\n") + 1) * 24 + 40))
+        others = str(r.get("他物件", "") or "").strip()
         with st.container(border=True):
-            if head:
-                st.caption(head)
-            # 単独の改行も改行として見せる（markdown は行末2スペースで hard break）
-            st.markdown(body.replace("\n", "  \n"))
+            with st.form(key=f"ixc_{iid}", border=False):
+                if head:
+                    st.caption(head)
+                new = st.text_area("内容", value=body, height=height,
+                                   label_visibility="collapsed")
+                if others:
+                    # この接触は複数物件にまたがる。content は共有なので、
+                    # ここで直すと他物件の詳細でも同じ本文が変わる。
+                    st.caption(f"⚠ この内容は {others} と共通です（直すと両方に反映）")
+                ok = st.form_submit_button("この内容を保存", type="primary")
+            if ok and new != body:
+                _save_interaction_content(str(iid), body, new)
+                st.success("保存しました。")
+                st.rerun()
 
 
-def render_sales_brokers():
+def render_sales_brokers(sales_hist: pd.DataFrame):
     """売買仲介の表。見た目は銀行打診・賃貸ヒアリングと同じ（行を選ぶと取引先カルテへ）。
 
     紹介元の指定は、この表とは分けて下の別枠（_render_source_picker）で行う。
     分ける理由は sales_broker_rows() の docstring を参照。
     表には★印だけ出して「どれが紹介元か」は分かるようにしておく。
     「内容」は表の下に全文で出す（他の2セクションと同じ扱い）。
+    sales_hist は render_interactions が作った hist のうち kind='sales_contact' の行。
+    内容ブロックの編集にはやりとり1件ずつが要るので、集計前のこれを使う。
     """
     pid = str(prop["id"])
     rows = sales_broker_rows(pid).reset_index(drop=True)
@@ -501,7 +537,7 @@ def render_sales_brokers():
         view["日付"] = (pd.to_datetime(view["最終接触"], errors="coerce")
                         .dt.strftime("%Y-%m-%d").fillna(""))
         view["印"] = view["紹介元"].map(lambda b: "★" if b else "")
-        for col in ["会社", "拠点", "担当者", "内容"]:
+        for col in ["会社", "拠点", "担当者"]:
             view[col] = view[col].fillna("").astype(str)
 
         # 「やりとり」件数列は出さない。実データは全56行が1件で、常に「1 件」を
@@ -528,7 +564,7 @@ def render_sales_brokers():
         if r:
             row = rows.loc[r[0]]
             goto_office_edit(row["office_id"], _office_kind(row["kinds"]), pid)
-        _content_blocks(view)
+        _content_blocks(sales_hist)
     else:
         st.caption("売買仲介のやりとりの記録はまだありません。")
 
@@ -788,7 +824,7 @@ def render_interactions():
     # 担当者は1回の接触に複数人いることがあるので ' / ' で連ねる。
     # 名寄せできなかった相手は person_name_raw に原文が残っているのでそれを使う。
     hist = query("""
-        select i.kind, o.id as office_id,
+        select i.kind, o.id as office_id, i.id as interaction_id,
                i.occurred_on as 日付,
                c.name as 会社, o.branch_name as 拠点,
                coalesce(
@@ -804,7 +840,11 @@ def render_interactions():
                      and coalesce(pe.is_current, true))
                ) as 担当者,
                ip.loanable_amount as 融資可能額,
-               coalesce(ip.result, i.content) as 内容
+               coalesce(ip.result, i.content) as 内容,
+               (select string_agg(coalesce(pr.name, x.property_name_raw), '・')
+                  from re_interaction_properties x
+                  left join re_properties pr on pr.id = x.property_id
+                 where x.interaction_id = i.id and x.id <> ip.id) as 他物件
         from re_interaction_properties ip
         join re_interactions i on i.id = ip.interaction_id
         join re_offices o on o.id = i.office_id
@@ -819,7 +859,7 @@ def render_interactions():
         hist["日付"] = (pd.to_datetime(hist["日付"], errors="coerce")
                         .dt.strftime("%Y-%m-%d").fillna(""))
         hist["融資可能額"] = pd.to_numeric(hist["融資可能額"], errors="coerce")
-        for col in ["会社", "拠点", "担当者", "内容"]:
+        for col in ["会社", "拠点", "担当者", "内容", "他物件"]:
             hist[col] = hist[col].fillna("").astype(str)
 
     # 種別ごとに見たいものが違う。
@@ -833,7 +873,7 @@ def render_interactions():
 
     WIDTH = {"日付": 100, "会社": 240, "拠点": 260, "担当者": 220, "融資可能額": 120}
 
-    render_sales_brokers()
+    render_sales_brokers(hist[hist["kind"] == "sales_contact"])
 
     shown_any = False
     for kind, label, cols, ckind in groups:
