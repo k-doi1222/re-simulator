@@ -392,19 +392,26 @@ def _full(text) -> str:
 
 
 def _full_cards(hist: pd.DataFrame) -> None:
-    """やりとりを1件ずつ、全文で読める形で並べる。
+    """やりとりを担当者ごとに1枠にまとめ、全文で読める形で並べる。
 
+    人の情報は日付で区切るより続けて読みたいので、日付・場所は各話の末尾に小さく添える。
+    DB は1回ずつの記録のまま（いつ聞いた話かを残すため）。表示だけまとめている。
     人についての話（re_interactions.content）だけを出す。物件ごとのメモは
     下の「物件ごとのメモ・結果」に出る。
+    複数人のやりとりは「A / B」の組で1枠にする（同じ話を各人に重複させない）。
     """
-    for _, r in hist.iterrows():
+    # hist は新しい順。枠の並びも「最近話した相手」順になる。
+    for who, g in hist.groupby(hist["相手"].replace("", "相手の記録なし"), sort=False):
         with st.container(border=True):
-            head = "　".join(x for x in [str(r["日付"]) or "日付なし", str(r["相手"]),
-                                        str(r["場所"])] if x)
-            st.markdown(f"**{_full(head)}**")
-            general = str(r["内容"]).strip()
-            if general:
-                st.markdown(_full(general))
+            st.markdown(f"**{_full(who)}**")
+            for _, r in g.iterrows():
+                place = " ".join(str(r["場所"]).split())   # 改行入りの場所も注記は1行に
+                note = "・".join(x for x in [str(r["日付"]) or "日付なし", place] if x)
+                general = str(r["内容"]).strip()
+                if general:
+                    st.markdown(f"{_full(general)}  \n:gray[（{_full(note)}）]")
+                else:
+                    st.markdown(f":gray[（{_full(note)}　話の記録なし）]")
 
 
 def interactions_of(office_id: str, ikind: str) -> pd.DataFrame:
