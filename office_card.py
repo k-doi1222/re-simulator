@@ -567,21 +567,30 @@ def _add_interaction_block(company_kind: str, office_id: str) -> None:
         # 保存した直後にこのカルテから消えてしまい、どこへ行ったか分からなくなる。
         kind_db = KIND_OF[company_kind]
 
-        with st.form(f"ix_add_{office_id}", border=False):
+        # 保存に成功したら回数を進めて、入力欄をまっさらにする。
+        # 残したままだと連打や再実行で同じ記録が二重に入る（実際に発生）。
+        # clear_on_submit は入力エラーのときも消えるので使わない。
+        gen_key = f"ix_gen_{office_id}"
+        gen = st.session_state.get(gen_key, 0)
+        fk = f"{office_id}_{gen}"
+
+        with st.form(f"ix_add_{fk}", border=False):
             c = st.columns([2, 2, 4])
-            a_on = c[0].date_input("日付", value=None)
-            a_loc = c[1].text_input("場所")
-            a_who = c[2].multiselect("相手", live["氏名"].tolist() if not live.empty else [])
+            a_on = c[0].date_input("日付", value=None, key=f"ix_on_{fk}")
+            a_loc = c[1].text_input("場所", key=f"ix_loc_{fk}")
+            a_who = c[2].multiselect("相手", live["氏名"].tolist() if not live.empty else [],
+                                     key=f"ix_who_{fk}")
             c = st.columns([5, 2])
-            a_props = c[0].multiselect("関係する物件（任意）", props["name"].tolist())
+            a_props = c[0].multiselect("関係する物件（任意）", props["name"].tolist(),
+                                       key=f"ix_props_{fk}")
             a_amt = c[1].number_input("融資可能額（万円・任意）", value=None,
-                                      step=100.0, format="%.0f",
+                                      step=100.0, format="%.0f", key=f"ix_amt_{fk}",
                                       help="銀行打診のとき、聞けた金額があれば")
             a_content = st.text_area(
-                "全般・担当者の話", height=100,
+                "全般・担当者の話", height=100, key=f"ix_content_{fk}",
                 help="この取引先や担当者についての話（異動、対応の様子、取引姿勢など）")
             a_prop_note = st.text_area(
-                "物件についての内容", height=100,
+                "物件についての内容", height=100, key=f"ix_pnote_{fk}",
                 help="選んだ物件についての話。複数選んだときは、全部に同じ文が入ります。"
                      "物件ごとに変えたいときは、記録後に「物件ごとのメモ・結果」で直せます")
             if st.form_submit_button("記録する", type="primary"):
@@ -616,7 +625,7 @@ def _add_interaction_block(company_kind: str, office_id: str) -> None:
                     """, {"id": str(uuid.uuid4()), "iid": iid,
                           "pid": str(props.loc[props["name"] == nm, "id"].iloc[0]),
                           "raw": nm, "result": _z(a_prop_note), "amt": a_amt})
-                st.success("記録しました。")
+                st.session_state[gen_key] = gen + 1
                 st.rerun()
 
 
