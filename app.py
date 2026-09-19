@@ -2,6 +2,7 @@
 import streamlit as st
 
 from auth import require_password
+from db import query
 
 st.set_page_config(page_title="不動産投資シミュレーション",
                    page_icon="🏢", layout="wide")
@@ -23,4 +24,12 @@ pg = st.navigation({
         st.Page("pages/analytics.py", title="分析", icon=":material/insights:"),
     ],
 })
+# DBの読み込みは5分間キャッシュしている。アプリの外（SQLなど）でDBを直したときに、
+# ブラウザを読み込み直さず（ログインや選択中の画面を保ったまま）最新にするためのボタン。
+with st.sidebar:
+    if st.button("最新の情報に更新", icon=":material/refresh:", width="stretch",
+                 help="DBの内容を読み直します。今の画面と選択はそのまま残ります"):
+        query.clear()
+        st.rerun()
+
 pg.run()
