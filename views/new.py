@@ -126,4 +126,4 @@ if submitted:
         query.clear()
         st.session_state["selected_id"] = str(new_id.iloc[0]["id"])
         st.success(f"「{name}」を登録しました。詳細画面へ移動します。")
-        st.switch_page("pages/detail.py")
+        st.switch_page("views/detail.py")

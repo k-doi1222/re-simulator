@@ -30,8 +30,8 @@ uv run streamlit run app.py
 | `auth.py` | パスワードによる入口の門 |
 | `db.py` | データベース接続。SELECTは5分キャッシュ |
 | `theme.py` | 入力値と計算値を見分けるための色 |
-| `pages/list.py` | 物件一覧 |
-| `pages/detail.py` | 物件詳細・シミュレーション・編集 |
+| `views/list.py` | 物件一覧 |
+| `views/detail.py` | 物件詳細・シミュレーション・編集 |
 
 ## 注意
 

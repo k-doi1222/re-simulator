@@ -21,7 +21,7 @@ head = st.columns([4, 1])
 head[0].markdown("### 物件一覧")
 with head[1]:
     if st.button("＋ 物件を登録", width="stretch"):
-        st.switch_page("pages/new.py")
+        st.switch_page("views/new.py")
 
 statuses = query("select status, description, row_color from re_property_statuses "
                  "order by sort_order")

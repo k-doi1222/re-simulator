@@ -11,17 +11,17 @@ require_password()
 
 pg = st.navigation({
     "物件": [
-        st.Page("pages/list.py", title="物件一覧", icon=":material/list:", default=True),
-        st.Page("pages/detail.py", title="物件詳細", icon=":material/apartment:"),
-        st.Page("pages/new.py", title="物件を登録", icon=":material/add:"),
+        st.Page("views/list.py", title="物件一覧", icon=":material/list:", default=True),
+        st.Page("views/detail.py", title="物件詳細", icon=":material/apartment:"),
+        st.Page("views/new.py", title="物件を登録", icon=":material/add:"),
     ],
     "取引先": [
-        st.Page("pages/banks.py", title="銀行", icon=":material/account_balance:"),
-        st.Page("pages/sales_brokers.py", title="売買仲介", icon=":material/handshake:"),
-        st.Page("pages/rental_agencies.py", title="賃貸仲介", icon=":material/key:"),
+        st.Page("views/banks.py", title="銀行", icon=":material/account_balance:"),
+        st.Page("views/sales_brokers.py", title="売買仲介", icon=":material/handshake:"),
+        st.Page("views/rental_agencies.py", title="賃貸仲介", icon=":material/key:"),
     ],
     "振り返り": [
-        st.Page("pages/analytics.py", title="分析", icon=":material/insights:"),
+        st.Page("views/analytics.py", title="分析", icon=":material/insights:"),
     ],
 })
 # DBの読み込みは5分間キャッシュしている。アプリの外（SQLなど）でDBを直したときに、

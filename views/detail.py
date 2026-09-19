@@ -119,7 +119,7 @@ def blank_to_none(s):
 
 def back_to_list():
     st.session_state.pop("property_table", None)  # 一覧の選択状態をリセット
-    st.switch_page("pages/list.py")
+    st.switch_page("views/list.py")
 
 
 # ── 対象物件の読み込み ───────────────────────────────────────

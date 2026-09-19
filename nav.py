@@ -5,7 +5,7 @@ Streamlit の表はセルにリンクを埋められないので、「行を選�
 """
 import streamlit as st
 
-PROPERTY_PAGE = "pages/detail.py"
+PROPERTY_PAGE = "views/detail.py"
 
 
 def clear_selection(*keys: str) -> None:
@@ -28,9 +28,9 @@ def goto_property(property_id: str) -> None:
 
 # 取引先の種別 → その画面
 OFFICE_PAGE = {
-    "bank": "pages/banks.py",
-    "sales_broker": "pages/sales_brokers.py",
-    "rental_agency": "pages/rental_agencies.py",
+    "bank": "views/banks.py",
+    "sales_broker": "views/sales_brokers.py",
+    "rental_agency": "views/rental_agencies.py",
 }
 
 
