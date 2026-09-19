@@ -400,6 +400,8 @@ def _full_cards(hist: pd.DataFrame) -> None:
     下の「物件ごとのメモ・結果」に出る。
     複数人のやりとりは「A / B」の組で1枠にする（同じ話を各人に重複させない）。
     """
+    # 話が空の回は出さない（名前だけの枠も作らない）。物件メモや表の方で見られる。
+    hist = hist[hist["内容"].astype(str).str.strip() != ""]
     # hist は新しい順。枠の並びも「最近話した相手」順になる。
     for who, g in hist.groupby(hist["相手"].replace("", "相手の記録なし"), sort=False):
         with st.container(border=True):
@@ -407,11 +409,7 @@ def _full_cards(hist: pd.DataFrame) -> None:
             for _, r in g.iterrows():
                 place = " ".join(str(r["場所"]).split())   # 改行入りの場所も注記は1行に
                 note = "・".join(x for x in [str(r["日付"]) or "日付なし", place] if x)
-                general = str(r["内容"]).strip()
-                if general:
-                    st.markdown(f"{_full(general)}  \n:gray[（{_full(note)}）]")
-                else:
-                    st.markdown(f":gray[（{_full(note)}　話の記録なし）]")
+                st.markdown(f"{_full(r['内容'])}  \n:gray[（{_full(note)}）]")
 
 
 def interactions_of(office_id: str, ikind: str) -> pd.DataFrame:
