@@ -577,10 +577,19 @@ def _add_interaction_block(company_kind: str, office_id: str) -> None:
             a_amt = c[1].number_input("融資可能額（万円・任意）", value=None,
                                       step=100.0, format="%.0f",
                                       help="銀行打診のとき、聞けた金額があれば")
-            a_content = st.text_area("内容", height=100)
+            a_content = st.text_area(
+                "全般・担当者の話", height=100,
+                help="この取引先や担当者についての話（異動、対応の様子、取引姿勢など）")
+            a_prop_note = st.text_area(
+                "物件についての内容", height=100,
+                help="選んだ物件についての話。複数選んだときは、全部に同じ文が入ります。"
+                     "物件ごとに変えたいときは、記録後に「物件ごとのメモ・結果」で直せます")
             if st.form_submit_button("記録する", type="primary"):
-                if not a_content.strip():
-                    st.error("内容を入力してください。")
+                if not a_content.strip() and not a_prop_note.strip():
+                    st.error("「全般・担当者の話」か「物件についての内容」のどちらかを入力してください。")
+                    return
+                if a_prop_note.strip() and not a_props:
+                    st.error("「物件についての内容」を入れるときは、関係する物件を選んでください。")
                     return
                 iid = str(uuid.uuid4())
                 execute("""
@@ -588,7 +597,7 @@ def _add_interaction_block(company_kind: str, office_id: str) -> None:
                       (id, office_id, kind, occurred_on, location, content)
                     values (cast(:id as uuid), cast(:oid as uuid), :k, :on, :loc, :content)
                 """, {"id": iid, "oid": office_id, "k": kind_db, "on": a_on,
-                      "loc": _z(a_loc), "content": a_content.strip()})
+                      "loc": _z(a_loc), "content": _z(a_content)})
                 for nm in a_who:
                     execute("""
                         insert into re_interaction_persons (id, interaction_id, person_id)
@@ -596,9 +605,8 @@ def _add_interaction_block(company_kind: str, office_id: str) -> None:
                     """, {"id": str(uuid.uuid4()), "iid": iid,
                           "pid": str(live.loc[live["氏名"] == nm, "id"].iloc[0])})
                 for nm in a_props:
-                    # 物件ごとの結果には、まず内容をそのまま写しておく。
-                    # 物件詳細の「内容」はこの値を先に見るため、写さないと空欄になる。
-                    # 物件ごとに返事が違ったら「物件ごとの結果を直す」で個別に直せる。
+                    # 物件ごとの結果には「物件についての内容」だけを入れる。
+                    # 全般・担当者の話（content）は写さない。
                     execute("""
                         insert into re_interaction_properties
                           (id, interaction_id, property_id, property_name_raw,
@@ -607,7 +615,7 @@ def _add_interaction_block(company_kind: str, office_id: str) -> None:
                                 :result, :amt)
                     """, {"id": str(uuid.uuid4()), "iid": iid,
                           "pid": str(props.loc[props["name"] == nm, "id"].iloc[0]),
-                          "raw": nm, "result": a_content.strip(), "amt": a_amt})
+                          "raw": nm, "result": _z(a_prop_note), "amt": a_amt})
                 st.success("記録しました。")
                 st.rerun()
 
