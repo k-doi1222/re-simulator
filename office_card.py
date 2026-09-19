@@ -570,14 +570,19 @@ def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
                   "（銀行の可否・金額、業者の物件評価など）。"
                   "物件詳細の「この物件についての結果・メモ」に出ます。")
         if full:
-            for _, r in res.iterrows():
-                amt = r["融資可能額"]
-                head = "　".join(x for x in [
-                    str(r["物件"]), str(r["日付"]), str(r["相手"]),
-                    f"融資可能額 {amt:,.0f} 万円" if pd.notna(amt) else ""] if x)
+            # やりとりの全文表示と同じ形にする（枠は物件ごとに1つ。
+            # 日付・相手・融資可能額は各メモの末尾に灰色で添え、中を日付で区切らない）。
+            for prop, g in res.groupby(res["物件"].replace("", "物件の記録なし"), sort=False):
                 with st.container(border=True):
-                    st.markdown(f"**{_full(head)}**")
-                    st.markdown(_full(r["メモ結果"]) or "（メモなし）")
+                    st.markdown(f"**{_full(prop)}**")
+                    for _, r in g.iterrows():
+                        amt = r["融資可能額"]
+                        note = "・".join(x for x in [
+                            str(r["日付"]) or "日付なし", str(r["相手"]),
+                            f"融資可能額 {amt:,.0f} 万円" if pd.notna(amt) else ""] if x)
+                        memo = str(r["メモ結果"]).strip()
+                        st.markdown((f"{_full(memo)}  \n" if memo else "")
+                                    + f":gray[（{_full(note)}）]")
             return
         cols = ["物件", "日付", "相手", "メモ結果"] + (["融資可能額"] if is_bank else [])
         conf = {
