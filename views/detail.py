@@ -947,6 +947,8 @@ def render_edit_form():
     st.markdown("#### 物件情報")
     structures = query("select structure from re_structure_types order by sort_order"
                        )["structure"].tolist()
+    # 入手経路の選択肢は re_inquiry_channels が持つ。増やすときはあの表に行を足す。
+    channels = query("select name, description from re_inquiry_channels order by sort_order")
 
     with st.form(key=f"edit_{prop['id']}"):
         # B / C / D ＋ X / Y
@@ -956,7 +958,13 @@ def render_edit_form():
         f_addr = c[1].text_input("所在地", txt(prop["address"]))
         f_name = c[2].text_input("物件名", txt(prop["name"]))
         f_contact = c[3].text_input("返信手段", txt(prop["contact_method"]))
-        f_channel = c[4].text_input("問合せ媒体", txt(prop["inquiry_channel"]))
+        cur_ch = txt(prop["inquiry_channel"])
+        ch_opts = channels["name"].tolist()
+        f_channel = c[4].selectbox(
+            "入手経路", ch_opts, index=ch_opts.index(cur_ch) if cur_ch in ch_opts else None,
+            placeholder="選ぶ（任意）",
+            help="この物件の情報をどこで知ったか（元Excelの「問合せ媒体」）。\n\n" + "\n".join(
+                f"- {r['name']}：{r['description']}" for _, r in channels.iterrows()))
 
         # AA 入力メモ ＋ 版のラベル
         c = st.columns([3, 2])
