@@ -151,7 +151,7 @@ def render_office_card(company_kind: str, office_id: str) -> None:
     head = query("""
         select c.name as 会社, o.branch_name as 拠点, o.phone as 電話,
                o.address as 所在地, o.region as 地域, o.bank_category as 区分,
-               o.closed_day as 定休日, o.notes as メモ,
+               o.closed_day as 定休日, o.website as "HP", o.notes as メモ,
                (select max(i.occurred_on) from re_interactions i
                  where i.office_id=o.id and i.kind=:ikind) as 最終接触,
                (select count(*) from re_interactions i
@@ -176,8 +176,11 @@ def render_office_card(company_kind: str, office_id: str) -> None:
     m[3].metric("担当者", f"{h['担当者数']:,} 名")
     m[4].metric("紹介物件", f"{h['紹介数']:,} 件")
     m[5].metric("区分・地域", "・".join(x for x in [h["区分"], h["地域"]] if x) or "—")
-    if h["所在地"]:
-        st.caption(f"所在地：{h['所在地']}" + (f"　／　定休日：{h['定休日']}" if h["定休日"] else ""))
+    info = ([f"所在地：{h['所在地']}"] if h["所在地"] else []) + \
+           ([f"定休日：{h['定休日']}"] if h["定休日"] else []) + \
+           ([f"HP：[{h['HP']}]({h['HP']})"] if h["HP"] else [])
+    if info:
+        st.caption("　／　".join(info))
 
     _office_info_block(company_kind, office_id, h)
     st.markdown("##### 担当者")
@@ -200,6 +203,7 @@ def _office_info_block(company_kind: str, office_id: str, h: pd.Series) -> None:
             f_region = c[0].text_input("地域", h["地域"] or "")
             f_cat = c[1].text_input("区分", h["区分"] or "")
             f_closed = c[2].text_input("定休日", h["定休日"] or "")
+            f_web = st.text_input("HP", h["HP"] or "", placeholder="https://")
             f_notes = st.text_area("メモ", h["メモ"] or "", height=70,
                                    help="元Excelの行番号などが入っている場合があります。消さないでください")
             if st.form_submit_button("拠点の情報を保存", type="primary"):
@@ -207,11 +211,11 @@ def _office_info_block(company_kind: str, office_id: str, h: pd.Series) -> None:
                     update re_offices
                        set branch_name = :b, phone = :p, address = :a,
                            region = :r, bank_category = :cat, closed_day = :cl,
-                           notes = :n, updated_at = now()
+                           website = :w, notes = :n, updated_at = now()
                      where id = cast(:oid as uuid)
                 """, {"oid": office_id, "b": _z(f_branch), "p": _z(f_phone),
                       "a": _z(f_addr), "r": _z(f_region), "cat": _z(f_cat),
-                      "cl": _z(f_closed), "n": _z(f_notes)})
+                      "cl": _z(f_closed), "w": _z(f_web), "n": _z(f_notes)})
                 st.success("保存しました。")
                 st.rerun()
 
