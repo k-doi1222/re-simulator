@@ -181,6 +181,7 @@ def render_office_card(company_kind: str, office_id: str) -> None:
            ([f"HP：[{h['HP']}]({h['HP']})"] if h["HP"] else [])
     if info:
         st.caption("　／　".join(info))
+    _summary_memo(h["メモ"])
 
     _office_info_block(company_kind, office_id, h)
     st.markdown("##### 担当者")
@@ -192,6 +193,23 @@ def render_office_card(company_kind: str, office_id: str) -> None:
 
 
 # ── 拠点そのものの情報 ──────────────────────────────────────
+_EXCEL_ROW = re.compile(r"^元Excel行 *\d+$")
+
+
+def _summary_memo(notes) -> None:
+    """拠点のまとめメモ（re_offices.notes）を読める形で出す。
+
+    人柄・場所・作戦など、日付で変わりにくい情報の置き場所。やりとりの記録とは分けて持つ。
+    銀行の「元Excel行 NN」は元データへ遡るための印なので、表示からは外す（DBからは消さない）。
+    """
+    t = "" if notes is None or (isinstance(notes, float) and pd.isna(notes)) else str(notes)
+    body = "\n".join(ln for ln in t.splitlines() if not _EXCEL_ROW.match(ln.strip())).strip()
+    if body:
+        with st.container(border=True):
+            st.caption("まとめメモ　—　直すときは「拠点の情報を直す」から")
+            st.markdown(_full(body))
+
+
 def _office_info_block(company_kind: str, office_id: str, h: pd.Series) -> None:
     with st.expander("拠点の情報を直す"):
         with st.form(f"oi_{office_id}", border=False):
@@ -204,8 +222,9 @@ def _office_info_block(company_kind: str, office_id: str, h: pd.Series) -> None:
             f_cat = c[1].text_input("区分", h["区分"] or "")
             f_closed = c[2].text_input("定休日", h["定休日"] or "")
             f_web = st.text_input("HP", h["HP"] or "", placeholder="https://")
-            f_notes = st.text_area("メモ", h["メモ"] or "", height=70,
-                                   help="元Excelの行番号などが入っている場合があります。消さないでください")
+            f_notes = st.text_area("まとめメモ", h["メモ"] or "", height=150,
+                                   help="場所・人柄・作戦など、日付で変わりにくい情報。"
+                                        "「元Excel行 NN」は元データへ遡る印なので消さないでください")
             if st.form_submit_button("拠点の情報を保存", type="primary"):
                 execute("""
                     update re_offices
