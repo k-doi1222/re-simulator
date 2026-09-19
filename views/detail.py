@@ -18,6 +18,7 @@ import streamlit as st
 from auth import require_password
 from db import execute, query, refresh_calc_cache
 from nav import goto_office_edit
+from office_card import METHODS
 from theme import CALC_BG, compact_css, money, ratio
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
@@ -722,7 +723,8 @@ def render_add_interaction():
 
             c = st.columns([2, 2, 4])
             a_on = c[0].date_input("日付", value=datetime.date.today(), key=k("on"))
-            a_loc = c[1].text_input("場所", key=k("loc"))
+            a_method = c[1].selectbox("手段", METHODS, index=None, key=k("method"),
+                                      placeholder="選ぶ（任意）")
             if ppl is not None and not ppl.empty:
                 # 拠点を切り替えると選択肢が総入れ替えになる。前の選択が残っていると
                 # 「選択肢に無い値」で落ちるので、キーに拠点も混ぜる。
@@ -782,10 +784,10 @@ def render_add_interaction():
 
         iid = str(uuid.uuid4())
         execute("""
-            insert into re_interactions (id, office_id, kind, occurred_on, location, content)
-            values (cast(:id as uuid), cast(:oid as uuid), :k, :on, :loc, :content)
+            insert into re_interactions (id, office_id, kind, occurred_on, method, content)
+            values (cast(:id as uuid), cast(:oid as uuid), :k, :on, :method, :content)
         """, {"id": iid, "oid": office_id, "k": kind_db, "on": a_on,
-              "loc": blank_to_none(a_loc), "content": a_content.strip()})
+              "method": a_method, "content": a_content.strip()})
 
         # 選んだ担当者 ＋ 新しく入れた担当者。新しい人は re_persons に作る。
         # person_name_raw に文字列で置くこともできるが、それだと取引先カルテの

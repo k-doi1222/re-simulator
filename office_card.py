@@ -30,6 +30,9 @@ KIND_LABEL = {"bank_inquiry": "銀行打診",
 KIND_OF = {"bank": "bank_inquiry",
            "rental_agency": "rental_hearing",
            "sales_broker": "sales_contact"}
+# やりとりの手段（re_interactions.method の check 制約と同じ並び）。
+# 残暑見舞い・年賀状は「手紙」。手紙を何回送った相手かを数えるのに使う。
+METHODS = ["電話", "面談", "メール", "手紙", "その他"]
 
 
 # ── 小道具 ──────────────────────────────────────────────────
@@ -394,7 +397,7 @@ def _full(text) -> str:
 def _full_cards(hist: pd.DataFrame) -> None:
     """やりとりを担当者ごとに1枠にまとめ、全文で読める形で並べる。
 
-    人の情報は日付で区切るより続けて読みたいので、日付・場所は各話の末尾に小さく添える。
+    人の情報は日付で区切るより続けて読みたいので、日付・手段は各話の末尾に小さく添える。
     DB は1回ずつの記録のまま（いつ聞いた話かを残すため）。表示だけまとめている。
     人についての話（re_interactions.content）だけを出す。物件ごとのメモは
     下の「物件ごとのメモ・結果」に出る。
@@ -407,14 +410,13 @@ def _full_cards(hist: pd.DataFrame) -> None:
         with st.container(border=True):
             st.markdown(f"**{_full(who)}**")
             for _, r in g.iterrows():
-                place = " ".join(str(r["場所"]).split())   # 改行入りの場所も注記は1行に
-                note = "・".join(x for x in [str(r["日付"]) or "日付なし", place] if x)
+                note = "・".join(x for x in [str(r["日付"]) or "日付なし", str(r["手段"])] if x)
                 st.markdown(f"{_full(r['内容'])}  \n:gray[（{_full(note)}）]")
 
 
 def interactions_of(office_id: str, ikind: str) -> pd.DataFrame:
     return query("""
-        select i.id, i.kind, i.occurred_on as 日付, i.location as 場所,
+        select i.id, i.kind, i.occurred_on as 日付, i.method as 手段,
                i.content as 内容,
                (select string_agg(coalesce(p.name, ipe.person_name_raw), ' / ')
                   from re_interaction_persons ipe
@@ -438,18 +440,18 @@ def _interactions_block(company_kind: str, office_id: str) -> None:
     else:
         hist["種別"] = hist["kind"].map(KIND_LABEL).fillna(hist["kind"])
         hist["日付"] = _dstr(hist["日付"])
-        hist = _blank(hist, ["場所", "内容", "相手", "物件"])
+        hist = _blank(hist, ["手段", "内容", "相手", "物件"])
 
         full = st.toggle("全文で表示", value=True, key=f"ix_full_{office_id}",
-                         help="オフにすると表になり、日付・場所・内容や物件ごとのメモを直せます")
+                         help="オフにすると表になり、日付・手段・内容や物件ごとのメモを直せます")
         if full:
             _full_cards(hist)
             st.caption("文章を直したいときは、上の「全文で表示」をオフにしてください。")
         else:
             # 種別はこのカルテ内で全部同じなので列には出さない（見出しに出ている）。
-            # 「どの物件の話か」は場所より先に知りたいので、相手のすぐ隣に置く。
+            # 「どの物件の話か」は手段より先に知りたいので、相手のすぐ隣に置く。
             # 内容が主役なので最後に置き、幅を指定せず残りを全部使わせる。
-            cols = ["日付", "相手", "物件", "場所", "内容"]
+            cols = ["日付", "相手", "物件", "手段", "内容"]
             edited = st.data_editor(
                 hist[cols], width="stretch", hide_index=True,
                 key=f"ix_ed_{office_id}",
@@ -460,13 +462,14 @@ def _interactions_block(company_kind: str, office_id: str) -> None:
                     "相手": st.column_config.TextColumn("相手", disabled=True, width=95,
                                                         help="下の「相手を付け替える」で変えられます"),
                     "物件": st.column_config.TextColumn("物件", disabled=True, width=170),
-                    "場所": st.column_config.TextColumn("場所", width=105),
+                    "手段": st.column_config.SelectboxColumn("手段", options=METHODS,
+                                                              width=80),
                     "内容": st.column_config.TextColumn("内容"),
                 })
-            edit_cols = ["日付", "場所", "内容"]
+            edit_cols = ["日付", "手段", "内容"]
             changed = _changed(edited[edit_cols], hist[edit_cols])
             n = int(changed.sum())
-            st.caption("日付・場所・内容はこの表で直せます。"
+            st.caption("日付・手段・内容はこの表で直せます。"
                       "内容を直すと、その内容をそのまま写していた「物件ごとの結果」も一緒に直します。")
             if st.button(f"やりとりの変更を保存（{n} 件）", type="primary", disabled=(n == 0),
                          key=f"ix_save_{office_id}"):
@@ -475,10 +478,10 @@ def _interactions_block(company_kind: str, office_id: str) -> None:
                     new_content = _z(edited.at[i, "内容"])
                     execute("""
                         update re_interactions
-                           set occurred_on = :on, location = :loc, content = :content
+                           set occurred_on = :on, method = :method, content = :content
                          where id = cast(:iid as uuid)
                     """, {"iid": iid, "on": _d(edited.at[i, "日付"]),
-                          "loc": _z(edited.at[i, "場所"]), "content": new_content})
+                          "method": _z(edited.at[i, "手段"]), "content": new_content})
                     # 銀行打診は移行時に content を物件側の result へそのまま写している。
                     # 写しのままのものだけ追随させる（個別に直された結果は触らない）。
                     execute("""
@@ -631,7 +634,8 @@ def _add_interaction_block(company_kind: str, office_id: str) -> None:
         with st.form(f"ix_add_{fk}", border=False):
             c = st.columns([2, 2, 4])
             a_on = c[0].date_input("日付", value=None, key=f"ix_on_{fk}")
-            a_loc = c[1].text_input("場所", key=f"ix_loc_{fk}")
+            a_method = c[1].selectbox("手段", METHODS, index=None, key=f"ix_method_{fk}",
+                                      placeholder="選ぶ（任意）")
             a_who = c[2].multiselect("相手", live["氏名"].tolist() if not live.empty else [],
                                      key=f"ix_who_{fk}")
             c = st.columns([5, 2])
@@ -657,10 +661,10 @@ def _add_interaction_block(company_kind: str, office_id: str) -> None:
                 iid = str(uuid.uuid4())
                 execute("""
                     insert into re_interactions
-                      (id, office_id, kind, occurred_on, location, content)
-                    values (cast(:id as uuid), cast(:oid as uuid), :k, :on, :loc, :content)
+                      (id, office_id, kind, occurred_on, method, content)
+                    values (cast(:id as uuid), cast(:oid as uuid), :k, :on, :method, :content)
                 """, {"id": iid, "oid": office_id, "k": kind_db, "on": a_on,
-                      "loc": _z(a_loc), "content": _z(a_content)})
+                      "method": a_method, "content": _z(a_content)})
                 for nm in a_who:
                     execute("""
                         insert into re_interaction_persons (id, interaction_id, person_id)
