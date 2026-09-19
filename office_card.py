@@ -298,7 +298,8 @@ def persons_of(office_id: str) -> pd.DataFrame:
                phone as 電話, email as メール, is_current as 現任,
                (select s.name from re_persons s where s.id = pe.succeeded_by) as 後任,
                (select count(*) from re_interaction_persons ip
-                 where ip.person_id = pe.id) as 接触回数
+                 where ip.person_id = pe.id) as 接触回数,
+               memo as まとめメモ
         from re_persons pe where office_id = cast(:oid as uuid)
         order by is_current desc, name
     """, {"oid": office_id})
@@ -306,12 +307,12 @@ def persons_of(office_id: str) -> pd.DataFrame:
 
 def _persons_block(company_kind: str, office_id: str) -> None:
     cur = persons_of(office_id)
-    cur = _blank(cur, ["氏名", "かな", "役職", "電話", "メール", "後任"])
+    cur = _blank(cur, ["氏名", "かな", "役職", "電話", "メール", "後任", "まとめメモ"])
 
     if cur.empty:
         st.caption("まだ登録がありません。下の「担当者を追加」から登録してください。")
     else:
-        cols = ["氏名", "かな", "役職", "電話", "メール", "現任", "後任", "接触回数"]
+        cols = ["氏名", "かな", "役職", "電話", "メール", "現任", "後任", "接触回数", "まとめメモ"]
         edited = st.data_editor(
             cur[cols], width="stretch", hide_index=True,
             key=f"pe_ed_{office_id}",
@@ -320,8 +321,12 @@ def _persons_block(company_kind: str, office_id: str) -> None:
                     "現任", help="外すと異動済になります。過去の記録はこの人に残ります"),
                 "後任": st.column_config.TextColumn("後任", disabled=True),
                 "接触回数": count("接触回数", disabled=True),
+                "まとめメモ": st.column_config.TextColumn(
+                    "まとめメモ", width="large",
+                    help="人柄・勤務形態など、日付で変わりにくいその人の情報。"
+                         "やりとりの全文表示で名前の下にも出ます"),
             })
-        edit_cols = ["氏名", "かな", "役職", "電話", "メール", "現任"]
+        edit_cols = ["氏名", "かな", "役職", "電話", "メール", "現任", "まとめメモ"]
         changed = _changed(edited[edit_cols], cur[edit_cols])
         n = int(changed.sum())
         if st.button(f"担当者の変更を保存（{n} 名）", type="primary", disabled=(n == 0),
@@ -330,13 +335,14 @@ def _persons_block(company_kind: str, office_id: str) -> None:
                 execute("""
                     update re_persons
                        set name = :name, name_kana = :kana, role = :role,
-                           phone = :phone, email = :email,
+                           phone = :phone, email = :email, memo = :memo,
                            is_current = :cur, updated_at = now()
                      where id = :id
                 """, {"id": str(cur.at[i, "id"]),
                       "name": _z(edited.at[i, "氏名"]), "kana": _z(edited.at[i, "かな"]),
                       "role": _z(edited.at[i, "役職"]), "phone": _z(edited.at[i, "電話"]),
                       "email": _z(edited.at[i, "メール"]),
+                      "memo": _z(edited.at[i, "まとめメモ"]),
                       "cur": bool(edited.at[i, "現任"])})
             st.success(f"{n} 名を更新しました。")
             st.rerun()
@@ -417,7 +423,7 @@ def _full(text) -> str:
     return _MD_SPECIAL.sub(r"\\\1", t.strip()).replace("\n", "  \n")
 
 
-def _full_cards(hist: pd.DataFrame) -> None:
+def _full_cards(hist: pd.DataFrame, memos: dict | None = None) -> None:
     """やりとりを担当者ごとに1枠にまとめ、全文で読める形で並べる。
 
     人の情報は日付で区切るより続けて読みたいので、日付・手段は各話の末尾に小さく添える。
@@ -425,13 +431,19 @@ def _full_cards(hist: pd.DataFrame) -> None:
     人についての話（re_interactions.content）だけを出す。物件ごとのメモは
     下の「物件ごとのメモ・結果」に出る。
     複数人のやりとりは「A / B」の組で1枠にする（同じ話を各人に重複させない）。
+    memos は 氏名 → 担当者のまとめメモ（re_persons.memo）。名前のすぐ下に出す。
     """
+    memos = memos or {}
     # 話が空の回は出さない（名前だけの枠も作らない）。物件メモや表の方で見られる。
     hist = hist[hist["内容"].astype(str).str.strip() != ""]
     # hist は新しい順。枠の並びも「最近話した相手」順になる。
     for who, g in hist.groupby(hist["相手"].replace("", "相手の記録なし"), sort=False):
         with st.container(border=True):
             st.markdown(f"**{_full(who)}**")
+            for nm in str(who).split(" / "):
+                if memos.get(nm):
+                    head = f"{nm}：" if " / " in str(who) else ""
+                    st.caption(f"まとめメモ　{_full(head + memos[nm])}")
             for _, r in g.iterrows():
                 note = "・".join(x for x in [str(r["日付"]) or "日付なし", str(r["手段"])] if x)
                 st.markdown(f"{_full(r['内容'])}  \n:gray[（{_full(note)}）]")
@@ -468,7 +480,9 @@ def _interactions_block(company_kind: str, office_id: str) -> None:
         full = st.toggle("全文で表示", value=True, key=f"ix_full_{office_id}",
                          help="オフにすると表になり、日付・手段・内容や物件ごとのメモを直せます")
         if full:
-            _full_cards(hist)
+            ppl = persons_of(office_id)
+            _full_cards(hist, {r["氏名"]: r["まとめメモ"] for _, r in ppl.iterrows()
+                               if isinstance(r["まとめメモ"], str) and r["まとめメモ"].strip()})
             st.caption("文章を直したいときは、上の「全文で表示」をオフにしてください。")
         else:
             # 種別はこのカルテ内で全部同じなので列には出さない（見出しに出ている）。
