@@ -391,22 +391,12 @@ def _full(text) -> str:
     return _MD_SPECIAL.sub(r"\\\1", t.strip()).replace("\n", "  \n")
 
 
-def _full_cards(office_id: str, ikind: str, hist: pd.DataFrame) -> None:
+def _full_cards(hist: pd.DataFrame) -> None:
     """やりとりを1件ずつ、全文で読める形で並べる。
 
-    人についての話（re_interactions.content）と、その回の物件ごとのメモ
-    （re_interaction_properties.result）を1つの枠にまとめる。
+    人についての話（re_interactions.content）だけを出す。物件ごとのメモは
+    下の「物件ごとのメモ・結果」に出る。
     """
-    res = query("""
-        select ip.interaction_id, coalesce(pr.name, ip.property_name_raw) as 物件,
-               ip.result as メモ, ip.loanable_amount as 融資可能額
-        from re_interaction_properties ip
-        join re_interactions i on i.id = ip.interaction_id
-        left join re_properties pr on pr.id = ip.property_id
-        where i.office_id = cast(:oid as uuid) and i.kind = :ikind
-        order by 2
-    """, {"oid": office_id, "ikind": ikind})
-    by_iid = {k: g for k, g in res.groupby(res["interaction_id"].astype(str))}
     for _, r in hist.iterrows():
         with st.container(border=True):
             head = "　".join(x for x in [str(r["日付"]) or "日付なし", str(r["相手"]),
@@ -415,16 +405,6 @@ def _full_cards(office_id: str, ikind: str, hist: pd.DataFrame) -> None:
             general = str(r["内容"]).strip()
             if general:
                 st.markdown(_full(general))
-            for _, m in by_iid.get(str(r["id"]), res.iloc[0:0]).iterrows():
-                memo = "" if pd.isna(m["メモ"]) else str(m["メモ"]).strip()
-                amt = m["融資可能額"]
-                label = f"物件：{m['物件']}" + (
-                    f"　融資可能額 {amt:,.0f} 万円" if pd.notna(amt) else "")
-                st.caption(_full(label))
-                if not memo:
-                    continue
-                # 移行や旧フォームで、全般の話をそのまま写しているものは繰り返さない
-                st.markdown("（上と同じ内容）" if memo == general else _full(memo))
 
 
 def interactions_of(office_id: str, ikind: str) -> pd.DataFrame:
@@ -458,7 +438,7 @@ def _interactions_block(company_kind: str, office_id: str) -> None:
         full = st.toggle("全文で表示", value=True, key=f"ix_full_{office_id}",
                          help="オフにすると表になり、日付・場所・内容や物件ごとのメモを直せます")
         if full:
-            _full_cards(office_id, ikind, hist)
+            _full_cards(hist)
             st.caption("文章を直したいときは、上の「全文で表示」をオフにしてください。")
         else:
             # 種別はこのカルテ内で全部同じなので列には出さない（見出しに出ている）。
@@ -522,7 +502,11 @@ def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
     is_bank = ikind == "bank_inquiry"
     res = query("""
         select ip.id, coalesce(pr.name, ip.property_name_raw) as 物件,
-               i.occurred_on as 日付, ip.result as メモ結果, ip.loanable_amount as 融資可能額
+               i.occurred_on as 日付, ip.result as メモ結果, ip.loanable_amount as 融資可能額,
+               (select string_agg(coalesce(p.name, ipe.person_name_raw), ' / ')
+                  from re_interaction_persons ipe
+                  left join re_persons p on p.id = ipe.person_id
+                 where ipe.interaction_id = i.id) as 相手
         from re_interaction_properties ip
         join re_interactions i on i.id = ip.interaction_id
         left join re_properties pr on pr.id = ip.property_id
@@ -531,7 +515,7 @@ def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
     """, {"oid": office_id, "ikind": ikind})
     if res.empty:
         return
-    res = _blank(res, ["物件", "メモ結果"])
+    res = _blank(res, ["物件", "メモ結果", "相手"])
     res["日付"] = _dstr(res["日付"])
     res["融資可能額"] = pd.to_numeric(res["融資可能額"], errors="coerce")
 
@@ -544,16 +528,17 @@ def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
             for _, r in res.iterrows():
                 amt = r["融資可能額"]
                 head = "　".join(x for x in [
-                    str(r["物件"]), str(r["日付"]),
+                    str(r["物件"]), str(r["日付"]), str(r["相手"]),
                     f"融資可能額 {amt:,.0f} 万円" if pd.notna(amt) else ""] if x)
                 with st.container(border=True):
                     st.markdown(f"**{_full(head)}**")
                     st.markdown(_full(r["メモ結果"]) or "（メモなし）")
             return
-        cols = ["物件", "日付", "メモ結果"] + (["融資可能額"] if is_bank else [])
+        cols = ["物件", "日付", "相手", "メモ結果"] + (["融資可能額"] if is_bank else [])
         conf = {
             "物件": st.column_config.TextColumn("物件", disabled=True, width=200),
             "日付": st.column_config.TextColumn("日付", disabled=True, width=110),
+            "相手": st.column_config.TextColumn("相手", disabled=True, width=95),
             "メモ結果": st.column_config.TextColumn("メモ・結果"),
         }
         if is_bank:
