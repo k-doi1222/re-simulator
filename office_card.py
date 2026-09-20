@@ -487,13 +487,17 @@ def _insert_person(office_id: str, name, kana, role, phone, email) -> str:
 
 
 # ── やりとり ────────────────────────────────────────────────
-_MD_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+!|>~$<-])")
+# `-` は行頭でしか Markdown の意味（箇条書き）を持たない。常にエスケープすると
+# 本文中の URL が壊れてリンクが開けなくなる（Evernote の共有リンクで実際に発生）。
+_MD_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+!|>~$<])")
+_MD_LEAD_DASH = re.compile(r"(?m)^(\s*)-")
 
 
 def _full(text) -> str:
     """長い文章を折り返してそのまま読めるようにする（Markdownとして解釈させない）。"""
     t = "" if text is None or (isinstance(text, float) and pd.isna(text)) else str(text)
-    return _MD_SPECIAL.sub(r"\\\1", t.strip()).replace("\n", "  \n")
+    t = _MD_SPECIAL.sub(r"\\\1", t.strip())
+    return _MD_LEAD_DASH.sub(r"\1\\-", t).replace("\n", "  \n")
 
 
 full_text = _full   # 物件詳細からも同じ整形を使う（改行そのまま・Markdown解釈なし）
@@ -557,7 +561,7 @@ def edit_popover(label: str, *, iid, on=None, method=None, content=None,
         f_c = st.text_area("やりとりの内容（相手先で共通）", "" if content is None else str(content),
                            height=160, key=f"{k}_c",
                            help="この相手と話したこと。物件によらない話はこちら")
-        if shared_note:
+        if shared_note and str(content or "").strip():
             # 注意書きは小窓の中だけに出す。読む画面に常時出すと、
             # 本当に危ないときに効かなくなる（空欄にも出ていた）。
             st.caption(f"⚠ この内容は {shared_note} と共通です（直すと両方に反映）")

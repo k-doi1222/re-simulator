@@ -61,6 +61,8 @@ def compact_css(table_vh: str = TABLE_VH) -> None:
       /* タグがない項目でも高さが揃うよう、空でも最低限の高さを確保する */
       .tp-pills {{ display: flex; gap: 0.3rem; flex-wrap: wrap; margin-top: 0.15rem;
                    min-height: 1.25rem; }}
+      /* 狭い画面ではカードが1列に積まれるので、高さ揃えのための下駄は要らない */
+      @media (max-width: 640px) {{ .tp-pills {{ min-height: 0; }} }}
       .tp-pill {{
           background: rgba(128,128,128,0.15);
           border-radius: 999px;

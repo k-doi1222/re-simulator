@@ -171,11 +171,11 @@ def render_summary():
     purchase_price = num(prop["purchase_price"])
     one = lambda s: txt(s).replace("\n", " ").strip()  # noqa: E731  改行を1行に畳む
 
-    # ── 1段目：物件そのもの ───────────────────────────────
-    c = st.columns([3.0, 3.2, 1.3])
-    c[0].metric("物件名", one(prop["name"]) or "（物件名なし）")
-    c[1].metric("所在地", one(prop["address"]) or "—")
-    c[2].metric("登録日付", str(prop["reply_date"]) if prop["reply_date"] else "—")
+    # ── 1段目：物件そのもの。名前は見出しにする（拠点カルテの会社名と同じ扱い）──
+    st.markdown(f"#### {one(prop['name']) or '（物件名なし）'}")
+    st.caption("　／　".join(x for x in [
+        f"所在地：{one(prop['address'])}" if one(prop["address"]) else "",
+        f"登録日付：{prop['reply_date']}" if prop["reply_date"] else ""] if x) or "—")
 
     # ── 2段目：値段。販売価格（元値）のすぐ隣で指値後価格を動かせるようにする ──
     # 入力欄の列は「指値後価格（万円）」のラベルが1行に収まる幅を確保する。
@@ -190,14 +190,18 @@ def render_summary():
             value=float(num(prop["negotiated_price"]) or purchase_price or 0),
             step=10.0, format="%.0f", key=f"ar_{prop['id']}")
     with c[2]:
-        if st.button("指値後価格を保存", type="primary", width="stretch"):
+        # ボタンの文字を長くすると、幅の狭い画面で1文字ずつ折り返す（実測565pxで8行）。
+        # 隣に対象（指値後価格の入力欄）が見えているので、表示は「保存」でよい。
+        if st.button("保存", type="primary", width="stretch",
+                     help="指値後価格を保存します"):
             execute("update re_properties set negotiated_price = :ar, updated_at = now() "
                     "where id = :id", {"ar": ar, "id": str(prop["id"])})
             st.toast("保存しました", icon=":material/check:")
             st.rerun()
 
     if not purchase_price:
-        st.warning("販売価格が未入力のため、判定を計算できません。下のフォームで入力してください。")
+        st.warning("販売価格が未入力のため、判定を計算できません。"
+                   "下の「物件情報を直す」から入力してください。")
         return None, None
 
     calc_in = {c: num(prop[c]) if c != "built_date" else day(prop[c]) for c in INPUT_COLS}
@@ -216,9 +220,11 @@ def render_summary():
         val_cls = "tp-val-sub" if sub else "tp-val"
         pill_cls = "tp-pill tp-pill-sub" if sub else "tp-pill"
         ps = "".join(f'<span class="{pill_cls}">{p}</span>' for p in pills)
+        # タグが無いときは帯ごと出さない。PCでは高さを揃えるために min-height を
+        # 持たせているが、スマホの1列ではカードの数だけ無駄な余白になる。
+        band = f'<div class="tp-pills">{ps}</div>' if ps else ""
         st.html(f'<div class="tp"><div class="{lab_cls}">{label}</div>'
-                f'<div class="{val_cls}">{value}</div>'
-                f'<div class="tp-pills">{ps}</div></div>')
+                f'<div class="{val_cls}">{value}</div>{band}</div>')
 
     def target_card(label, price, rate, cf):
         """目標判定に乗せる価格。100万円刻みに切り下げているので、
@@ -239,25 +245,27 @@ def render_summary():
     t = f"{total:.0f}" if total is not None else "—"
     occ_text = "—" if o == "—" and t == "—" else f"{o}/{t}"
 
-    c = st.columns([1.0, 1.35, 0.85, 1.0, 0.9, 0.95, 1.65, 1.65])
+    # 並びは「値段の話 → 物件の素性」。指値後価格と、目標に乗せる価格2つを続けて置く。
+    # スマホでは1列に縦積みされるので、この順でないと値段の話が離れてしまう。
+    c = st.columns([1.0, 1.35, 1.65, 1.65, 0.85, 1.0, 0.9, 0.95])
     with c[0]:
         card("CF基準", row["c_bu"] or "—")
     with c[1]:
         card("指値後価格", f"{ar:,.0f} 万円", [discount_pill(ar)])
     with c[2]:
-        card("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
-    with c[3]:
-        card("満室利回り", f"{row['c_bq'] * 100:.1f}%" if pd.notna(row["c_bq"]) else "—")
-    with c[4]:
-        card("入居状況", occ_text)
-    with c[5]:
-        card("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
-    with c[6]:
         target_card("△150 にする指値後価格", num(prop["t150_price"]),
                     num(prop["t150_rate"]), txt(prop["t150_cf"]))
-    with c[7]:
+    with c[3]:
         target_card("○200 にする指値後価格", num(prop["t200_price"]),
                     num(prop["t200_rate"]), txt(prop["t200_cf"]))
+    with c[4]:
+        card("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
+    with c[5]:
+        card("満室利回り", f"{row['c_bq'] * 100:.1f}%" if pd.notna(row["c_bq"]) else "—")
+    with c[6]:
+        card("入居状況", occ_text)
+    with c[7]:
+        card("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
 
     # 元Excel行は移行してきた物件だけが持つ。この画面から登録した物件は空なので、
     # 「元Excel None行目」と出ないよう、あるときだけ添える。
@@ -362,7 +370,8 @@ def render_memo():
                                              for _, r in sts.iterrows()))
     with c[1]:
         st.write("")
-        if st.button("状況を保存", width="stretch", disabled=(new_st == cur)):
+        if st.button("保存", width="stretch", disabled=(new_st == cur),
+                     help="検討状況を保存します"):
             execute("update re_properties set status = :s, updated_at = now() where id = :id",
                     {"s": new_st, "id": str(prop["id"])})
             st.rerun()
@@ -462,38 +471,52 @@ def _office_kind(kinds) -> str:
 
 
 def _content_blocks(part: pd.DataFrame) -> None:
-    """やりとりの本文を全文で出す。直すのは日付の行（灰色）から小窓を開く。
+    """やりとりの本文を、**相手（担当者）ごとに1枠**で出す。直すのは日付の行から。
 
-    以前は1件ごとに入力欄を開きっぱなしにしていたが、読む回数の方がはるかに多く、
-    空欄の入力欄と保存ボタンでページが10画面ぶんに膨らんでいた。
-    読む形を既定にして、直すときだけ拠点カルテと同じ小窓を開く。
+    拠点カルテと同じ考え方で「その画面で固定されていない軸」で束ねる。
+    拠点カルテは拠点が固定なので人と物件で束ね、ここは物件が固定なので人で束ねる。
+    1件ずつ枠に分けていたときは、同じ相手の名前が枠の数だけ反復し、
+    同じ人の話が分断されていた（売買仲介は1人の話が4枠に分かれていた）。
+    枠の先頭に相手の名前を出すのは、長い記録だと読み始めても誰の話か分からないため。
     """
-    for _, r in part.iterrows():
-        iid = r.get("interaction_id")
-        if not iid:
-            continue
-        shared = str(r.get("内容共通", "") or "").strip()
-        per_prop = str(r.get("物件結果", "") or "").strip()
-        ip_id = str(r.get("ip_id") or "")
-        head = "・".join(x for x in [str(r.get("日付", "") or "") or "日付なし",
-                                     str(r.get("手段", "") or ""),
-                                     str(r.get("拠点", "") or r.get("会社", "") or ""),
-                                     str(r.get("担当者", "") or "")] if x)
-        others = str(r.get("他物件", "") or "").strip()
+    part = part[part["interaction_id"].notna()]
+    if part.empty:
+        return
+    # 日付なしはその人についての恒常的な話であることが多いので、枠の先頭に置く
+    part = part.assign(_nodate=part["日付"].astype(str).str.strip().eq(""))
+    part = part.sort_values("_nodate", ascending=False, kind="stable")
+    is_bank = (part["kind"] == "bank_inquiry").any()
+    who = (part["担当者"].astype(str).str.strip()
+           .replace("", "相手の記録なし"))
+    for name, g in part.groupby(who, sort=False):
+        r0 = g.iloc[0]
+        # 銀行は会社名（銀行名）まで要る。仲介は拠点名に会社名が入っていることが多い
+        place = [str(r0.get("会社", "") or "")] if is_bank else []
+        place += [str(r0.get("拠点", "") or "")]
+        title = "　".join(x for x in place + [str(name)] if x and x != "nan")
         with st.container(border=True):
-            if shared:
-                st.markdown(full_text(shared))
-            if per_prop:
+            st.markdown(f"**{full_text(title)}**")
+            for _, r in g.iterrows():
+                shared = str(r.get("内容共通", "") or "").strip()
+                per_prop = str(r.get("物件結果", "") or "").strip()
+                ip_id = str(r.get("ip_id") or "")
+                note = "・".join(x for x in [str(r.get("日付", "") or "") or "日付なし",
+                                            str(r.get("手段", "") or "")] if x)
                 if shared:
-                    st.markdown(":gray[この物件について]")
-                st.markdown(full_text(per_prop))
-            if not shared and not per_prop:
-                st.markdown(":gray[（本文はまだありません）]")
-            edit_popover(f"（{head}）", iid=str(iid), ip_id=ip_id or None,
-                         on=r.get("日付"), method=r.get("手段"), content=shared,
-                         result=per_prop, amount=r.get("融資可能額"),
-                         is_bank=(r.get("kind") == "bank_inquiry"),
-                         shared_note=others, key=f"d{iid}")
+                    st.markdown(full_text(shared))
+                if per_prop:
+                    if shared:
+                        st.markdown(":gray[この物件について]")
+                    st.markdown(full_text(per_prop))
+                if not shared and not per_prop:
+                    st.markdown(":gray[（本文はまだありません）]")
+                edit_popover(f"（{note}）", iid=str(r["interaction_id"]),
+                             ip_id=ip_id or None,
+                             on=r.get("日付"), method=r.get("手段"), content=shared,
+                             result=per_prop, amount=r.get("融資可能額"),
+                             is_bank=(r.get("kind") == "bank_inquiry"),
+                             shared_note=str(r.get("他物件", "") or "").strip(),
+                             key=f"d{r['interaction_id']}")
 
 
 def render_sales_brokers(sales_hist: pd.DataFrame):
@@ -507,6 +530,7 @@ def render_sales_brokers(sales_hist: pd.DataFrame):
     内容ブロックの編集にはやりとり1件ずつが要るので、集計前のこれを使う。
     """
     pid = str(prop["id"])
+    _render_source_picker(pid)
     rows = sales_broker_rows(pid).reset_index(drop=True)
 
     if not rows.empty:
@@ -527,8 +551,8 @@ def render_sales_brokers(sales_hist: pd.DataFrame):
                 if c in ("印", "会社", "担当者")
                 or (view[c].astype(str).str.strip() != "").any()]
 
-        st.caption(f"売買仲介　{len(view)} 件　—　行を選ぶと相手先の担当者を直せます"
-                  "（★＝この物件の紹介元）")
+        st.caption(f"売買仲介　相手先 {len(view)} 件・やりとり {len(sales_hist)} 件"
+                  "　—　行を選ぶと相手先の担当者を直せます（★＝この物件の紹介元）")
         conf = {
             "印":     st.column_config.TextColumn("紹介元", width=55),
             "日付":   st.column_config.TextColumn("日付", width=100),
@@ -546,8 +570,6 @@ def render_sales_brokers(sales_hist: pd.DataFrame):
         _content_blocks(sales_hist)
     else:
         st.caption("売買仲介のやりとりの記録はまだありません。")
-
-    _render_source_picker(pid)
 
 
 def _render_source_picker(pid: str) -> None:
@@ -881,7 +903,8 @@ def render_interactions():
                and (src[c].astype(str).str.strip() != "").any()]
         table = src[vis + ["office_id"]]
         shown_any = True
-        st.caption(f"{label}　{len(table)} 件　—　行を選ぶと相手先の担当者を直せます")
+        st.caption(f"{label}　相手先 {src['担当者'].nunique()} 件・やりとり {len(src)} 件"
+                  "　—　行を選ぶと相手先の担当者を直せます")
         conf = {c: (money(c) if c == "融資可能額"
                     else st.column_config.TextColumn(c, width=WIDTH[c])) for c in vis}
         conf["office_id"] = None  # 飛び先を持たせるだけの列。画面には出さない
