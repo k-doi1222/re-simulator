@@ -29,7 +29,10 @@ pg = st.navigation({
 with st.sidebar:
     if st.button("最新の情報に更新", icon=":material/refresh:", width="stretch",
                  help="DBの内容を読み直します。今の画面と選択はそのまま残ります"):
+        # **ここで st.rerun() を呼ばないこと。** ボタンが押された時点で1回実行され、
+        # その回に pg.run() まで進めば最新データで描き直される。
+        # rerun するとページが描画されないまま次の回に移り、ページ側のウィジェット
+        # （取引先の selectbox など）の選択が捨てられて、別の拠点に戻ってしまう。
         query.clear()
-        st.rerun()
 
 pg.run()
