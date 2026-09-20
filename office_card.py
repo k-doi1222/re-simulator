@@ -188,6 +188,7 @@ def render_office_card(company_kind: str, office_id: str) -> None:
         select c.name as 会社, o.branch_name as 拠点, o.phone as 電話,
                o.address as 所在地, o.region as 地域, o.bank_category as 区分,
                o.closed_day as 定休日, o.website as "HP", o.notes as メモ,
+               o.import_note as 申し送り,
                (select max(i.occurred_on) from re_interactions i
                  where i.office_id=o.id and i.kind=:ikind) as 最終接触,
                (select count(*) from re_interactions i
@@ -229,6 +230,7 @@ def render_office_card(company_kind: str, office_id: str) -> None:
            ([f"HP：[{h['HP']}]({h['HP']})"] if h["HP"] else [])
     if info:
         st.caption("　／　".join(info))
+    _import_note(office_id, h["申し送り"])
     _summary_memo(h["メモ"])
 
     _office_info_block(company_kind, office_id, h)
@@ -242,6 +244,26 @@ def render_office_card(company_kind: str, office_id: str) -> None:
 
 # ── 拠点そのものの情報 ──────────────────────────────────────
 _EXCEL_ROW = re.compile(r"^元Excel行 *\d+$")
+
+
+def _import_note(office_id: str, note) -> None:
+    """自動登録（物件メールの仕組み）からの申し送り（re_offices.import_note）。
+
+    **人が書く「まとめメモ」（notes）とは欄を分けてある。** 機械の気づきを同じ欄に混ぜると
+    人のメモが埋もれるため（物件側で input_memo と import_note を分けたのと同じ考え方）。
+
+    いまのところ入るのは「資料の業者住所が登録と違うかもしれない」だけ。
+    **直すかどうかは人が決める**ので、ここは気づかせて、確認したら消せるようにするだけにする。
+    """
+    t = "" if note is None or (isinstance(note, float) and pd.isna(note)) else str(note).strip()
+    if not t:
+        return
+    st.warning(t, icon=":material/flag:")
+    if st.button("確認した（この申し送りを消す）", key=f"imp_clear_{office_id}"):
+        execute("update re_offices set import_note = null, updated_at = now()"
+                " where id = cast(:oid as uuid)", {"oid": office_id})
+        st.toast("申し送りを消しました。", icon=":material/check:")
+        st.rerun()
 
 
 def _summary_memo(notes) -> None:
@@ -302,6 +324,11 @@ def _office_info_block(company_kind: str, office_id: str, h: pd.Series) -> None:
                   "a": _z(f_addr), "r": _z(f_region), "cat": _z(f_cat),
                   "cl": _z(f_closed), "w": _z(f_web),
                   "n": _z("\n".join(x for x in [f_notes.strip(), *keep] if x))})
+            # 所在地を直したなら、住所についての申し送りは役目を終えている
+            # （人がここで判断した、ということなので残す意味がない）
+            if _z(f_addr) != _z(h["所在地"]):
+                execute("update re_offices set import_note = null"
+                        " where id = cast(:oid as uuid)", {"oid": office_id})
             st.toast("保存しました。", icon=":material/check:")
             st.rerun()
 

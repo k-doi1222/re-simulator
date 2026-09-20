@@ -634,6 +634,17 @@ def _render_source_picker(pid: str) -> None:
             cur_label = m.iloc[0]["label"]
 
     st.caption("紹介元（この物件を持ってきてくれた業者）")
+
+    # 自動登録がその業者について気づいたこと（re_offices.import_note）を読むだけで添える。
+    # **持ち場は業者の側**で、ここは同じ値を見ているだけ。
+    # 物件のメモに書き写すと、その1物件にだけ残り、直しても消えなくなる（2026-09-20 決定）。
+    if cur_office:
+        note = query("select import_note from re_offices where id = cast(:o as uuid)",
+                     {"o": cur_office})
+        if not note.empty and txt(note.iloc[0]["import_note"]):
+            st.warning(txt(note.iloc[0]["import_note"]), icon=":material/flag:")
+            st.caption("この業者についての申し送りです。取引先の画面で直すと消えます")
+
     c = st.columns([6, 1], vertical_alignment="bottom")
     sel = c[0].selectbox(
         "紹介元にする担当者", opts, index=opts.index(cur_label),
