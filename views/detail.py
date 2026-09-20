@@ -181,8 +181,11 @@ def render_summary():
     # 入力欄の列は「指値後価格（万円）」のラベルが1行に収まる幅を確保する。
     # 折り返すと入力欄が1行分下がり、隣の保存ボタンと高さがずれる。
     # vertical_alignment="bottom" で、ラベルの有無に関わらず下端を揃える。
-    c = st.columns([1.3, 2.1, 0.8, 5.3], vertical_alignment="bottom")
-    c[0].metric("販売価格", f"{purchase_price:,.0f} 万円" if purchase_price else "—")
+    # 「いくらで出ている → いくらにする → その判定 → 目標に乗る価格2つ」を1行に収める。
+    # 判定は下の計算結果が要るので、列だけ先に作っておき、あとから中身を書き込む。
+    c = st.columns([1.45, 1.75, 0.8, 1.0, 1.6, 1.6], vertical_alignment="bottom")
+    c[0].metric("販売価格", f"{purchase_price:,.0f} 万円" if purchase_price else "—",
+                help=f"{purchase_price:,.0f} 万円" if purchase_price else None)
     with c[1]:
         # 整数に見せるのは書式だけ。int のウィジェットにすると保存時に丸めてしまう
         ar = st.number_input(
@@ -207,7 +210,7 @@ def render_summary():
     calc_in = {c: num(prop[c]) if c != "built_date" else day(prop[c]) for c in INPUT_COLS}
     row = query(LIVE_SQL, {**calc_in, "ar": ar}).iloc[0]
 
-    # ── 3段目：判定まわり ─────────────────────────────────
+    # ── 判定まわり ───────────────────────────────────────
     def discount_pill(price):
         """販売価格からの下げ幅を「↓◯%」で表す。上振れなら向きを反転させる。"""
         rate = (1 - price / purchase_price) * 100
@@ -245,26 +248,26 @@ def render_summary():
     t = f"{total:.0f}" if total is not None else "—"
     occ_text = "—" if o == "—" and t == "—" else f"{o}/{t}"
 
-    # 並びは「値段の話 → 物件の素性」。指値後価格と、目標に乗せる価格2つを続けて置く。
-    # スマホでは1列に縦積みされるので、この順でないと値段の話が離れてしまう。
-    c = st.columns([1.0, 1.35, 1.65, 1.65, 0.85, 1.0, 0.9, 0.95])
-    with c[0]:
-        card("CF基準", row["c_bu"] or "—")
-    with c[1]:
-        card("指値後価格", f"{ar:,.0f} 万円", [discount_pill(ar)])
-    with c[2]:
+    # 2段目の残り（判定と、目標に乗せる価格2つ）。指値後価格は入力欄が兼ねるので
+    # カードでは出さない（以前は入力欄とカードで2回出ていた）。
+    with c[3]:
+        card("CF基準", row["c_bu"] or "—", [discount_pill(ar)])
+    with c[4]:
         target_card("△150 にする指値後価格", num(prop["t150_price"]),
                     num(prop["t150_rate"]), txt(prop["t150_cf"]))
-    with c[3]:
+    with c[5]:
         target_card("○200 にする指値後価格", num(prop["t200_price"]),
                     num(prop["t200_rate"]), txt(prop["t200_cf"]))
-    with c[4]:
+
+    # 3段目は物件の素性だけ
+    c = st.columns([1, 1, 1, 1])
+    with c[0]:
         card("築年数", f"{row['c_bb']:.0f} 年" if pd.notna(row["c_bb"]) else "—")
-    with c[5]:
+    with c[1]:
         card("満室利回り", f"{row['c_bq'] * 100:.1f}%" if pd.notna(row["c_bq"]) else "—")
-    with c[6]:
+    with c[2]:
         card("入居状況", occ_text)
-    with c[7]:
+    with c[3]:
         card("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
 
     # 元Excel行は移行してきた物件だけが持つ。この画面から登録した物件は空なので、
@@ -565,7 +568,8 @@ def render_sales_brokers(sales_hist: pd.DataFrame):
                 if c in ("印", "会社", "担当者")
                 or (view[c].astype(str).str.strip() != "").any()]
 
-        st.caption(f"売買仲介　相手先 {len(view)} 件・やりとり {len(sales_hist)} 件"
+        st.markdown("###### 売買仲介")
+        st.caption(f"相手先 {len(view)} 件・やりとり {len(sales_hist)} 件"
                   "　—　行を選ぶと相手先の担当者を直せます（★＝この物件の紹介元）")
         conf = {
             "印":     st.column_config.TextColumn("紹介元", width=55),
@@ -583,7 +587,8 @@ def render_sales_brokers(sales_hist: pd.DataFrame):
             goto_office_edit(row["office_id"], _office_kind(row["kinds"]), pid)
         _content_blocks(sales_hist)
     else:
-        st.caption("売買仲介のやりとりの記録はまだありません。")
+        st.markdown("###### 売買仲介")
+        st.caption("やりとりの記録はまだありません。")
 
 
 def _render_source_picker(pid: str) -> None:
@@ -621,7 +626,7 @@ def _render_source_picker(pid: str) -> None:
         if not m.empty:
             cur_label = m.iloc[0]["label"]
 
-    st.markdown("**紹介元（この物件を持ってきてくれた業者）**")
+    st.caption("紹介元（この物件を持ってきてくれた業者）")
     c = st.columns([6, 1], vertical_alignment="bottom")
     sel = c[0].selectbox(
         "紹介元にする担当者", opts, index=opts.index(cur_label),
@@ -917,7 +922,8 @@ def render_interactions():
                and (src[c].astype(str).str.strip() != "").any()]
         table = src[vis + ["office_id"]]
         shown_any = True
-        st.caption(f"{label}　相手先 {src['担当者'].nunique()} 件・やりとり {len(src)} 件"
+        st.markdown(f"###### {label}")
+        st.caption(f"相手先 {src['担当者'].nunique()} 件・やりとり {len(src)} 件"
                   "　—　行を選ぶと相手先の担当者を直せます")
         conf = {c: (money(c) if c == "融資可能額"
                     else st.column_config.TextColumn(c, width=WIDTH[c])) for c in vis}
