@@ -169,15 +169,23 @@ def render_office_card(company_kind: str, office_id: str) -> None:
 
     st.markdown(f"#### {h['会社']}　{h['拠点'] or ''}")
 
-    m = st.columns(6)
-    m[0].metric("電話", h["電話"] or "—")
-    m[1].metric("最後のやりとり", str(h["最終接触"]) if h["最終接触"] else
-                ("日付なし" if h["接触回数"] else "—"))
-    m[2].metric(KIND_LABEL[ikind], f"{h['接触回数']:,} 件")
-    m[3].metric("担当者", f"{h['担当者数']:,} 名")
-    m[4].metric("紹介物件", f"{h['紹介数']:,} 件")
-    m[5].metric("区分・地域", "・".join(x for x in [h["区分"], h["地域"]] if x) or "—")
-    info = ([f"所在地：{h['所在地']}"] if h["所在地"] else []) + \
+    # 種別で意味のあるものだけ出す。銀行以外では「区分・地域」が常に空、
+    # 賃貸仲介では紹介物件が常に0で、枠が飾りになっていた。
+    # 長い値は metric が黙って切るので、全文は help（?）で読めるようにする。
+    cells = [("電話", h["電話"] or "—", h["電話"]),
+             ("最後のやりとり",
+              str(h["最終接触"]) if h["最終接触"] else ("日付なし" if h["接触回数"] else "—"), None),
+             (KIND_LABEL[ikind], f"{h['接触回数']:,} 件", None),
+             ("担当者", f"{h['担当者数']:,} 名", None)]
+    if company_kind != "rental_agency":
+        cells.append(("紹介物件", f"{h['紹介数']:,} 件", None))
+    if company_kind == "bank":
+        cat = "・".join(x for x in [h["区分"], h["地域"]] if x)
+        cells.append(("区分・地域", cat or "—", cat))
+    m = st.columns(len(cells))
+    for col, (lab, val, full) in zip(m, cells):
+        col.metric(lab, val, help=full if full and len(str(full)) > 8 else None)
+    info = ([f"所在地：{str(h['所在地']).splitlines()[0]}"] if h["所在地"] else []) + \
            ([f"定休日：{h['定休日']}"] if h["定休日"] else []) + \
            ([f"HP：[{h['HP']}]({h['HP']})"] if h["HP"] else [])
     if info:
@@ -562,6 +570,8 @@ def _interactions_block(company_kind: str, office_id: str) -> None:
                          help="オフにすると表になり、日付・手段・内容や物件ごとのメモを直せます")
         if full:
             st.markdown("###### 担当者ごと")
+            if hist["内容"].astype(str).str.strip().eq("").all():
+                st.caption("本文のある記録はまだありません。")
             ppl = persons_of(office_id)
             _full_cards(hist, {r["氏名"]: r["まとめメモ"] for _, r in ppl.iterrows()
                                if isinstance(r["まとめメモ"], str) and r["まとめメモ"].strip()})
@@ -650,10 +660,10 @@ def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
     shown = int((res["メモ結果"].astype(str).str.strip() != "").sum())
     # 担当者ごとと同じ見出しの重さで並べる（折りたたみ枠に入れると枠が二重になる）
     st.markdown("###### 物件ごと")
-    st.caption(f"{shown if full else len(res)} 件　—　"
+    # 件数はモードで変えない。「何を数えたか」が分からなくなるため。
+    st.caption(f"メモのある {shown} 件（やりとり全 {len(res)} 件）　—　"
                "やりとりのうち物件ごとに分けて残したいこと"
-               "（銀行の可否・金額、業者の物件評価など）。"
-               "物件詳細の「この物件についての結果・メモ」に出ます。")
+               "（銀行の可否・金額、業者の物件評価など）。物件詳細にも同じものが出ます。")
     if full:
         # やりとりの全文表示と同じ形にする（枠は物件ごとに1つ。
         # 日付・相手・融資可能額は各メモの末尾に灰色で添え、中を日付で区切らない）。
