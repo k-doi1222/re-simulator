@@ -454,6 +454,9 @@ def _full(text) -> str:
     return _MD_SPECIAL.sub(r"\\\1", t.strip()).replace("\n", "  \n")
 
 
+full_text = _full   # 物件詳細からも同じ整形を使う（改行そのまま・Markdown解釈なし）
+
+
 def _full_cards(hist: pd.DataFrame, memos: dict | None = None) -> None:
     """やりとりを担当者ごとに1枠にまとめ、全文で読める形で並べる。
 
@@ -488,7 +491,7 @@ def _full_cards(hist: pd.DataFrame, memos: dict | None = None) -> None:
 
 def edit_popover(label: str, *, iid, on=None, method=None, content=None,
                  ip_id=None, result=None, amount=None, is_bank: bool = False,
-                 key: str = "") -> None:
+                 shared_note: str = "", key: str = "") -> None:
     """やりとり1件を、読んでいるその場で直す小窓。
 
     **読む形を既定にして、直すときだけ小窓を開く**という方針の中心部品。
@@ -509,6 +512,10 @@ def edit_popover(label: str, *, iid, on=None, method=None, content=None,
         f_c = st.text_area("やりとりの内容（相手先で共通）", "" if content is None else str(content),
                            height=160, key=f"{k}_c",
                            help="この相手と話したこと。物件によらない話はこちら")
+        if shared_note:
+            # 注意書きは小窓の中だけに出す。読む画面に常時出すと、
+            # 本当に危ないときに効かなくなる（空欄にも出ていた）。
+            st.caption(f"⚠ この内容は {shared_note} と共通です（直すと両方に反映）")
         f_r = f_amt = None
         if ip_id:
             f_r = st.text_area("物件ごとのメモ", "" if result is None else str(result),

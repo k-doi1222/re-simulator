@@ -18,7 +18,7 @@ import streamlit as st
 from auth import require_password
 from db import execute, query, refresh_calc_cache
 from nav import goto_office_edit
-from office_card import METHODS
+from office_card import METHODS, edit_popover, full_text
 from theme import CALC_BG, compact_css, money, ratio
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
@@ -461,80 +461,39 @@ def _office_kind(kinds) -> str:
     return "sales_broker"
 
 
-def _save_interaction_content(iid: str, old: str, new: str) -> None:
-    """やりとりの「内容（相手先で共通）」＝ re_interactions.content を書き戻す。
-
-    文言は2か所にある（CLAUDE.md「接触の文言は2か所にある」）。
-      re_interactions.content          … 話したこと（本体・接触ごとに共有）
-      re_interaction_properties.result … その接触の物件ごとの結果・メモ
-    銀行打診は result が content の写しで作られている。写しのままのものだけ
-    content の変更に追随させ、いったん物件ごとに書き分けられた result は触らない。
-    """
-    execute("update re_interactions set content = :new where id = cast(:iid as uuid)",
-            {"new": blank_to_none(new), "iid": iid})
-    if old.strip():
-        execute("""
-            update re_interaction_properties set result = :new
-             where interaction_id = cast(:iid as uuid)
-               and result is not distinct from :old
-        """, {"new": blank_to_none(new), "iid": iid, "old": old})
-
-
-def _save_interaction_result(ip_id: str, new: str) -> None:
-    """「この物件についての結果・メモ」＝ re_interaction_properties.result を書き戻す。
-
-    その物件の1行だけを直す（他物件・content には触れない）。
-    """
-    execute("update re_interaction_properties set result = :r where id = cast(:id as uuid)",
-            {"r": blank_to_none(new), "id": ip_id})
-
-
-def _ta_height(body: str, lo: int, hi: int) -> int:
-    """text_area の高さを中身の行数に合わせる。"""
-    return min(hi, max(lo, (body.count("\n") + 1) * 24 + 40))
-
-
 def _content_blocks(part: pd.DataFrame) -> None:
-    """やりとりの本文を表の下に全文で出す。ここで編集もできる。
+    """やりとりの本文を全文で出す。直すのは日付の行（灰色）から小窓を開く。
 
-    2層に分けて出す（CLAUDE.md「接触の文言は2か所にある」の考え方）。
-      「この接触の内容（相手先で共通）」＝ re_interactions.content
-      「この物件についての結果・メモ」    ＝ re_interaction_properties.result
-    銀行の可否・金額、業者の物件評価など「物件ごとに分けたい話」は下段へ。
+    以前は1件ごとに入力欄を開きっぱなしにしていたが、読む回数の方がはるかに多く、
+    空欄の入力欄と保存ボタンでページが10画面ぶんに膨らんでいた。
+    読む形を既定にして、直すときだけ拠点カルテと同じ小窓を開く。
     """
     for _, r in part.iterrows():
         iid = r.get("interaction_id")
         if not iid:
             continue
-        shared = str(r.get("内容共通", "") or "")
-        per_prop = str(r.get("物件結果", "") or "")
+        shared = str(r.get("内容共通", "") or "").strip()
+        per_prop = str(r.get("物件結果", "") or "").strip()
         ip_id = str(r.get("ip_id") or "")
-        head = "　".join(x for x in [str(r.get("日付", "") or ""),
+        head = "・".join(x for x in [str(r.get("日付", "") or "") or "日付なし",
+                                     str(r.get("手段", "") or ""),
                                      str(r.get("拠点", "") or r.get("会社", "") or ""),
                                      str(r.get("担当者", "") or "")] if x)
         others = str(r.get("他物件", "") or "").strip()
         with st.container(border=True):
-            if head:
-                st.caption(head)
-            with st.form(key=f"ixc_c_{iid}", border=False):
-                new_s = st.text_area("やりとりの内容（相手先で共通）", value=shared,
-                                     height=_ta_height(shared, 100, 600))
-                if others:
-                    # content は接触ごとに共有。ここを直すと他物件の詳細でも変わる。
-                    st.caption(f"⚠ この内容は {others} と共通です（直すと両方に反映）")
-                ok_s = st.form_submit_button("内容を保存", type="primary")
-            if ok_s and new_s != shared:
-                _save_interaction_content(str(iid), shared, new_s)
-                st.rerun()
-            if ip_id:
-                with st.form(key=f"ixc_r_{ip_id}", border=False):
-                    new_p = st.text_area("この物件についての結果・メモ（任意）",
-                                         value=per_prop,
-                                         height=_ta_height(per_prop, 80, 320))
-                    ok_p = st.form_submit_button("この物件の分を保存")
-                if ok_p and new_p != per_prop:
-                    _save_interaction_result(ip_id, new_p)
-                    st.rerun()
+            if shared:
+                st.markdown(full_text(shared))
+            if per_prop:
+                if shared:
+                    st.markdown(":gray[この物件について]")
+                st.markdown(full_text(per_prop))
+            if not shared and not per_prop:
+                st.markdown(":gray[（本文はまだありません）]")
+            edit_popover(f"（{head}）", iid=str(iid), ip_id=ip_id or None,
+                         on=r.get("日付"), method=r.get("手段"), content=shared,
+                         result=per_prop, amount=r.get("融資可能額"),
+                         is_bank=(r.get("kind") == "bank_inquiry"),
+                         shared_note=others, key=f"d{iid}")
 
 
 def render_sales_brokers(sales_hist: pd.DataFrame):
@@ -858,7 +817,7 @@ def render_interactions():
     # 名寄せできなかった相手は person_name_raw に原文が残っているのでそれを使う。
     hist = query("""
         select i.kind, o.id as office_id, i.id as interaction_id,
-               i.occurred_on as 日付,
+               i.occurred_on as 日付, i.method as 手段,
                c.name as 会社, o.branch_name as 拠点,
                coalesce(
                  (select string_agg(coalesce(p.name, ipe.person_name_raw), ' / ')
@@ -893,7 +852,7 @@ def render_interactions():
         hist["日付"] = (pd.to_datetime(hist["日付"], errors="coerce")
                         .dt.strftime("%Y-%m-%d").fillna(""))
         hist["融資可能額"] = pd.to_numeric(hist["融資可能額"], errors="coerce")
-        for col in ["会社", "拠点", "担当者", "内容共通", "物件結果", "他物件"]:
+        for col in ["会社", "拠点", "担当者", "内容共通", "物件結果", "他物件", "手段"]:
             hist[col] = hist[col].fillna("").astype(str)
 
     # 種別ごとに見たいものが違う。
