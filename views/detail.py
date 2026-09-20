@@ -968,7 +968,14 @@ def render_edit_form():
     # 入手経路の選択肢は re_inquiry_channels が持つ。増やすときはあの表に行を足す。
     channels = query("select name, description from re_inquiry_channels order by sort_order")
 
-    with st.expander("物件情報を直す", expanded=True), st.form(key=f"edit_{prop['id']}"):
+    # **もともとは st.form（まとめて送信）だった。** 2026-09-20 に、保存ボタンの振る舞いを
+    # 全画面で揃えるため form をやめた（form は送信するまで入力値が分からず、
+    # 「変えたときだけ押せる」にできない）。欄を移るたびに画面を作り直す。
+    # 手元の実測で1回0.2〜0.3秒。**遅く感じたら form に戻してよい**：
+    # `with st.expander(...), st.form(key=f"edit_{prop['id']}"):` に戻し、
+    # 保存ボタンを st.form_submit_button("物件情報を保存", type="primary") にして、
+    # 下の changed 判定を消すだけ（コミット 7c0cc1e の1つ前が form の状態）。
+    with st.expander("物件情報を直す", expanded=True):
         # B / C / D ＋ X / Y
         c = st.columns([2, 3, 3, 2, 2])
         # 元Excelの列名は「返信日付」だが、実態はこのDBに登録した日付なので画面上は「登録日付」
@@ -1064,7 +1071,46 @@ def render_edit_form():
                                    step=1.0, format="%.0f",
                                    help=f"通常は空欄。空欄なら構造から自動で {prop['useful_life']:.0f} 年")
 
-        saved = st.form_submit_button("物件情報を保存", type="primary")
+        after = {
+            "reply_date": f_reply, "address": blank_to_none(f_addr),
+            "name": blank_to_none(f_name),
+            "contact_method": blank_to_none(f_contact),
+            "inquiry_channel": blank_to_none(f_channel),
+            "has_elevator": blank_to_none(f_ev), "has_septic_tank": blank_to_none(f_septic),
+            "free_internet": blank_to_none(f_net), "hazard": blank_to_none(f_hazard),
+            "occupied_units": f_occ, "total_units": f_total,
+            "parking_spaces": f_park, "external_parking": blank_to_none(f_expark),
+            "structure": f_struct, "built_date": f_built,
+            "purchase_price": f_price, "negotiated_price": f_nego,
+            "road_price_actual": f_road, "property_tax": f_tax,
+            "land_area": f_land, "zoning": blank_to_none(f_zoning),
+            "zone_coef": None if f_zcoef_pct is None else f_zcoef_pct / 100,
+            "shape_coef": None if f_scoef_pct is None else f_scoef_pct / 100,
+            "floor_area": f_floor,
+            "full_income": f_full, "current_income": f_curr, "extra_cost": f_extra,
+            "bank_offered_rate": f_rate, "legal_useful_life": f_life,
+            "scenario_label": blank_to_none(f_label),
+            "input_memo": blank_to_none(f_input_memo),
+        }
+
+        def same(k, v):
+            """DBの今の値と、入力された値を比べる。型と丸めのゆれを吸収する。"""
+            cur = prop[k] if k in prop else None
+            if k in ("zone_coef", "shape_coef"):
+                # 画面は%（100倍）で入力する。往復で出る微小な誤差は同じ扱いにする
+                a, b = num(cur), v
+                return (a is None and b is None) or (
+                    a is not None and b is not None and abs(a - b) < 1e-9)
+            if isinstance(v, (int, float)) or (v is None and pd.api.types.is_number(cur)):
+                a, b = num(cur), (None if v is None else float(v))
+                return (a is None and b is None) or (a is not None and b is not None and a == b)
+            if k in ("reply_date", "built_date"):
+                return day(cur) == v
+            return txt(cur) == ("" if v is None else str(v))
+
+        changed = [k for k, v in after.items() if not same(k, v)]
+        saved = st.button(f"物件情報を保存（{len(changed)} 項目）", type="primary",
+                          key=f"edit_save_{prop['id']}", disabled=not changed)
 
     if saved:
         execute(UPDATE_SQL, {
