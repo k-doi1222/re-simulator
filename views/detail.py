@@ -1005,9 +1005,14 @@ def render_edit_form():
         c = st.columns(8)
 
         def pick(col, label, cur, help=None):
+            """あり・なしの欄。**選択肢に無い値でも今の値を選択肢に足して見せる。**
+
+            勝手に空欄へ倒すと、開いただけで「変更あり」になり、気づかず保存すると
+            値が消える（GASが「無」と書いた物件で実際に起きた。2026-09-20）。
+            """
             v = txt(cur)
-            return col.selectbox(label, ARINASHI,
-                                 index=ARINASHI.index(v) if v in ARINASHI else 0, help=help)
+            opts = ARINASHI if v in ARINASHI else ARINASHI + [v]
+            return col.selectbox(label, opts, index=opts.index(v), help=help)
 
         f_ev = pick(c[0], "EV", prop["has_elevator"])
         f_septic = pick(c[1], "浄化槽", prop["has_septic_tank"])
@@ -1028,8 +1033,9 @@ def render_edit_form():
         # 路価実は小数第1位まで。係数は %（100倍）で入力してもらい、保存時に戻す。
         c = st.columns(6)
         cur_st = txt(prop["structure"])
-        f_struct = c[0].selectbox("構造", structures,
-                                  index=structures.index(cur_st) if cur_st in structures else 0)
+        # 構造も同じ。マスターに無い値でも、今の値をそのまま見せる（勝手に倒さない）
+        st_opts = structures if cur_st in structures else structures + [cur_st]
+        f_struct = c[0].selectbox("構造", st_opts, index=st_opts.index(cur_st))
         f_built = c[1].date_input("建築日", day(prop["built_date"]),
                                   min_value=datetime.date(1950, 1, 1))
         f_price = c[2].number_input("販売価格(万円)", value=num(prop["purchase_price"]),
