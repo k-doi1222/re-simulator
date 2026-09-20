@@ -167,7 +167,10 @@ def render_office_card(company_kind: str, office_id: str) -> None:
         return
     h = head.iloc[0]
 
-    st.markdown(f"#### {h['会社']}　{h['拠点'] or ''}")
+    c = st.columns([5, 1.4], vertical_alignment="bottom")
+    c[0].markdown(f"#### {h['会社']}　{h['拠点'] or ''}")
+    if c[1].button("＋ やりとりを記録", key=f"addix_{office_id}", width="stretch"):
+        add_interaction_dialog(company_kind, office_id)
 
     # 種別で意味のあるものだけ出す。銀行以外では「区分・地域」が常に空、
     # 賃貸仲介では紹介物件が常に0で、枠が飾りになっていた。
@@ -627,7 +630,6 @@ def _interactions_block(company_kind: str, office_id: str) -> None:
         _results_block(office_id, ikind, full)
         _persons_link_block(office_id, hist)
 
-    _add_interaction_block(company_kind, office_id)
 
 
 def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
@@ -753,79 +755,88 @@ def _persons_link_block(office_id: str, hist: pd.DataFrame) -> None:
             st.rerun()
 
 
-def _add_interaction_block(company_kind: str, office_id: str) -> None:
-    with st.expander("やりとりを記録する"):
-        ppl = persons_of(office_id)
-        live = ppl[ppl["現任"].fillna(True)] if not ppl.empty else ppl
-        props = query("""
-            select id, name from re_properties
-            where name is not null order by reply_date desc nulls last
-        """)
-        # 種別はこの画面のもので固定する。他の種別で記録すると、
-        # 保存した直後にこのカルテから消えてしまい、どこへ行ったか分からなくなる。
-        kind_db = KIND_OF[company_kind]
+@st.dialog("やりとりを記録する", width="large")
+def add_interaction_dialog(company_kind: str, office_id: str) -> None:
+    """記録の入口。**ページの一番下ではなくヘッダから開く。**
 
-        # 保存に成功したら回数を進めて、入力欄をまっさらにする。
-        # 残したままだと連打や再実行で同じ記録が二重に入る（実際に発生）。
-        # clear_on_submit は入力エラーのときも消えるので使わない。
-        gen_key = f"ix_gen_{office_id}"
-        gen = st.session_state.get(gen_key, 0)
-        fk = f"{office_id}_{gen}"
+    毎日いちばん使う操作なのに、以前は過去ログを全部通り過ぎた先（ページの85%地点）に
+    あった。読むためのページを、書くために下まで辿る必要がなくなる。
+    """
+    _add_interaction_form(company_kind, office_id)
 
-        with st.form(f"ix_add_{fk}", border=False):
-            c = st.columns([2, 2, 4])
-            a_on = c[0].date_input("日付", value=None, key=f"ix_on_{fk}")
-            a_method = c[1].selectbox("手段", METHODS, index=None, key=f"ix_method_{fk}",
-                                      placeholder="選ぶ（任意）")
-            a_who = c[2].multiselect("相手", live["氏名"].tolist() if not live.empty else [],
-                                     key=f"ix_who_{fk}")
-            c = st.columns([5, 2])
-            a_props = c[0].multiselect("関係する物件（任意）", props["name"].tolist(),
-                                       key=f"ix_props_{fk}")
-            a_amt = c[1].number_input("融資可能額（万円・任意）", value=None,
-                                      step=100.0, format="%.0f", key=f"ix_amt_{fk}",
-                                      help="銀行打診のとき、聞けた金額があれば")
-            a_content = st.text_area(
-                "やりとりの内容（相手先で共通）", height=100, key=f"ix_content_{fk}",
-                help="この取引先や担当者についての話（異動、対応の様子、取引姿勢など）。物件によらない話はこちら")
-            a_prop_note = st.text_area(
-                "物件ごとのメモ", height=100, key=f"ix_pnote_{fk}",
-                help="選んだ物件についての話。複数選んだときは、全部に同じ文が入ります。"
-                     "物件ごとに変えたいときは、記録後に「物件ごとのメモ・結果」で直せます")
-            if st.form_submit_button("記録する", type="primary"):
-                if not a_content.strip() and not a_prop_note.strip():
-                    st.error("「やりとりの内容」か「物件ごとのメモ」のどちらかを入力してください。")
-                    return
-                if a_prop_note.strip() and not a_props:
-                    st.error("「物件ごとのメモ」を入れるときは、関係する物件を選んでください。")
-                    return
-                iid = str(uuid.uuid4())
+
+def _add_interaction_form(company_kind: str, office_id: str) -> None:
+    ppl = persons_of(office_id)
+    live = ppl[ppl["現任"].fillna(True)] if not ppl.empty else ppl
+    props = query("""
+        select id, name from re_properties
+        where name is not null order by reply_date desc nulls last
+    """)
+    # 種別はこの画面のもので固定する。他の種別で記録すると、
+    # 保存した直後にこのカルテから消えてしまい、どこへ行ったか分からなくなる。
+    kind_db = KIND_OF[company_kind]
+
+    # 保存に成功したら回数を進めて、入力欄をまっさらにする。
+    # 残したままだと連打や再実行で同じ記録が二重に入る（実際に発生）。
+    # clear_on_submit は入力エラーのときも消えるので使わない。
+    gen_key = f"ix_gen_{office_id}"
+    gen = st.session_state.get(gen_key, 0)
+    fk = f"{office_id}_{gen}"
+
+    with st.form(f"ix_add_{fk}", border=False):
+        c = st.columns([2, 2, 4])
+        a_on = c[0].date_input("日付", value=None, key=f"ix_on_{fk}")
+        a_method = c[1].selectbox("手段", METHODS, index=None, key=f"ix_method_{fk}",
+                                  placeholder="選ぶ（任意）")
+        a_who = c[2].multiselect("相手", live["氏名"].tolist() if not live.empty else [],
+                                 key=f"ix_who_{fk}")
+        c = st.columns([5, 2])
+        a_props = c[0].multiselect("関係する物件（任意）", props["name"].tolist(),
+                                   key=f"ix_props_{fk}")
+        a_amt = c[1].number_input("融資可能額（万円・任意）", value=None,
+                                  step=100.0, format="%.0f", key=f"ix_amt_{fk}",
+                                  help="銀行打診のとき、聞けた金額があれば")
+        a_content = st.text_area(
+            "やりとりの内容（相手先で共通）", height=100, key=f"ix_content_{fk}",
+            help="この取引先や担当者についての話（異動、対応の様子、取引姿勢など）。物件によらない話はこちら")
+        a_prop_note = st.text_area(
+            "物件ごとのメモ", height=100, key=f"ix_pnote_{fk}",
+            help="選んだ物件についての話。複数選んだときは、全部に同じ文が入ります。"
+                 "物件ごとに変えたいときは、記録後に「物件ごとのメモ・結果」で直せます")
+        if st.form_submit_button("記録する", type="primary"):
+            if not a_content.strip() and not a_prop_note.strip():
+                st.error("「やりとりの内容」か「物件ごとのメモ」のどちらかを入力してください。")
+                return
+            if a_prop_note.strip() and not a_props:
+                st.error("「物件ごとのメモ」を入れるときは、関係する物件を選んでください。")
+                return
+            iid = str(uuid.uuid4())
+            execute("""
+                insert into re_interactions
+                  (id, office_id, kind, occurred_on, method, content)
+                values (cast(:id as uuid), cast(:oid as uuid), :k, :on, :method, :content)
+            """, {"id": iid, "oid": office_id, "k": kind_db, "on": a_on,
+                  "method": a_method, "content": _z(a_content)})
+            for nm in a_who:
                 execute("""
-                    insert into re_interactions
-                      (id, office_id, kind, occurred_on, method, content)
-                    values (cast(:id as uuid), cast(:oid as uuid), :k, :on, :method, :content)
-                """, {"id": iid, "oid": office_id, "k": kind_db, "on": a_on,
-                      "method": a_method, "content": _z(a_content)})
-                for nm in a_who:
-                    execute("""
-                        insert into re_interaction_persons (id, interaction_id, person_id)
-                        values (cast(:id as uuid), cast(:iid as uuid), :pid)
-                    """, {"id": str(uuid.uuid4()), "iid": iid,
-                          "pid": str(live.loc[live["氏名"] == nm, "id"].iloc[0])})
-                for nm in a_props:
-                    # 物件ごとの結果には「物件についての内容」だけを入れる。
-                    # 全般・担当者の話（content）は写さない。
-                    execute("""
-                        insert into re_interaction_properties
-                          (id, interaction_id, property_id, property_name_raw,
-                           result, loanable_amount)
-                        values (cast(:id as uuid), cast(:iid as uuid), :pid, :raw,
-                                :result, :amt)
-                    """, {"id": str(uuid.uuid4()), "iid": iid,
-                          "pid": str(props.loc[props["name"] == nm, "id"].iloc[0]),
-                          "raw": nm, "result": _z(a_prop_note), "amt": a_amt})
-                st.session_state[gen_key] = gen + 1
-                st.rerun()
+                    insert into re_interaction_persons (id, interaction_id, person_id)
+                    values (cast(:id as uuid), cast(:iid as uuid), :pid)
+                """, {"id": str(uuid.uuid4()), "iid": iid,
+                      "pid": str(live.loc[live["氏名"] == nm, "id"].iloc[0])})
+            for nm in a_props:
+                # 物件ごとの結果には「物件についての内容」だけを入れる。
+                # 全般・担当者の話（content）は写さない。
+                execute("""
+                    insert into re_interaction_properties
+                      (id, interaction_id, property_id, property_name_raw,
+                       result, loanable_amount)
+                    values (cast(:id as uuid), cast(:iid as uuid), :pid, :raw,
+                            :result, :amt)
+                """, {"id": str(uuid.uuid4()), "iid": iid,
+                      "pid": str(props.loc[props["name"] == nm, "id"].iloc[0]),
+                      "raw": nm, "result": _z(a_prop_note), "amt": a_amt})
+            st.session_state[gen_key] = gen + 1
+            st.rerun()
 
 
 # ── 関係する物件 ────────────────────────────────────────────
