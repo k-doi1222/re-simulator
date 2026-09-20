@@ -116,6 +116,11 @@ def blank_to_none(s):
     return None if s is None or str(s).strip() == "" else s
 
 
+def one_line(v) -> str:
+    """物件名の改行を1行に畳む（版の選択肢などに使う）。"""
+    return " ".join(txt(v).split())
+
+
 def back_to_list():
     st.session_state.pop("property_table", None)  # 一覧の選択状態をリセット
     st.switch_page("views/list.py")
@@ -152,7 +157,7 @@ with head[0]:
         back_to_list()
 
 if len(versions) > 1:
-    labels = [f"{txt(r.scenario_label) or '—'}（{r['name']}・行{r.excel_row}）"
+    labels = [f"{txt(r.scenario_label) or '—'}（{one_line(r['name'])}）"
               for _, r in versions.iterrows()]
     idx_by_id = {str(r.id): i for i, (_, r) in enumerate(versions.iterrows())}
     with head[1]:
@@ -268,12 +273,10 @@ def render_summary():
     with c[3]:
         card("積算比率", f"{row['c_bp'] * 100:.0f}%" if pd.notna(row["c_bp"]) else "—")
 
-    # 元Excel行は移行してきた物件だけが持つ。この画面から登録した物件は空なので、
-    # 「元Excel None行目」と出ないよう、あるときだけ添える。
-    origin = (f"　／　元Excel {prop['excel_row']:.0f}行目"
-              if pd.notna(prop["excel_row"]) else "")
+    # 元Excel行（excel_row）はDBに残すが、画面には出さない。
+    # 移行の名残で、今は見ても使い道がないため（2026-09-20）。
     st.caption(f"構造 {txt(prop['structure']) or '未設定'}"
-              f"・法定耐用年数 {prop['useful_life']:.0f}年" + origin)
+              f"・法定耐用年数 {prop['useful_life']:.0f}年")
     return ar, row
 
 

@@ -277,9 +277,14 @@ def _office_info_block(company_kind: str, office_id: str, h: pd.Series) -> None:
             f_cat = c[1].text_input("区分", h["区分"] or "")
             f_closed = c[2].text_input("定休日", h["定休日"] or "")
             f_web = st.text_input("HP", h["HP"] or "", placeholder="https://")
-            f_notes = st.text_area("まとめメモ", h["メモ"] or "", height=150,
-                                   help="場所・人柄・作戦など、日付で変わりにくい情報。"
-                                        "「元Excel行 NN」は元データへ遡る印なので消さないでください")
+            # 「元Excel行 NN」は元データへ遡るための印。画面には出さず、DBには残す。
+            # 編集欄からも隠し、保存のときに元の行を付け直す（消えないように）。
+            keep = [ln for ln in str(h["メモ"] or "").splitlines()
+                    if _EXCEL_ROW.match(ln.strip())]
+            shown = "\n".join(ln for ln in str(h["メモ"] or "").splitlines()
+                               if not _EXCEL_ROW.match(ln.strip())).strip()
+            f_notes = st.text_area("まとめメモ", shown, height=150,
+                                   help="場所・人柄・作戦など、日付で変わりにくい情報")
             if st.form_submit_button("拠点の情報を保存", type="primary"):
                 execute("""
                     update re_offices
@@ -289,7 +294,8 @@ def _office_info_block(company_kind: str, office_id: str, h: pd.Series) -> None:
                      where id = cast(:oid as uuid)
                 """, {"oid": office_id, "b": _z(f_branch), "p": _z(f_phone),
                       "a": _z(f_addr), "r": _z(f_region), "cat": _z(f_cat),
-                      "cl": _z(f_closed), "w": _z(f_web), "n": _z(f_notes)})
+                      "cl": _z(f_closed), "w": _z(f_web),
+                      "n": _z("\n".join(x for x in [f_notes.strip(), *keep] if x))})
                 st.toast("保存しました。", icon=":material/check:")
                 st.rerun()
 
