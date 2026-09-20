@@ -171,7 +171,8 @@ def render_office_card(company_kind: str, office_id: str) -> None:
 
     m = st.columns(6)
     m[0].metric("電話", h["電話"] or "—")
-    m[1].metric("最終接触", str(h["最終接触"]) if h["最終接触"] else "—")
+    m[1].metric("最後のやりとり", str(h["最終接触"]) if h["最終接触"] else
+                ("日付なし" if h["接触回数"] else "—"))
     m[2].metric(KIND_LABEL[ikind], f"{h['接触回数']:,} 件")
     m[3].metric("担当者", f"{h['担当者数']:,} 名")
     m[4].metric("紹介物件", f"{h['紹介数']:,} 件")
@@ -236,7 +237,7 @@ def _office_info_block(company_kind: str, office_id: str, h: pd.Series) -> None:
                 """, {"oid": office_id, "b": _z(f_branch), "p": _z(f_phone),
                       "a": _z(f_addr), "r": _z(f_region), "cat": _z(f_cat),
                       "cl": _z(f_closed), "w": _z(f_web), "n": _z(f_notes)})
-                st.success("保存しました。")
+                st.toast("保存しました。", icon=":material/check:")
                 st.rerun()
 
     if company_kind == "bank":
@@ -288,7 +289,7 @@ def _loan_terms_block(office_id: str) -> None:
                 """, {"oid": office_id, "cand": _z(f_cand), "rate": _z(f_rate),
                       "area": _z(f_area), "term": _z(f_term), "int": _z(f_int),
                       "lim": _z(f_lim), "full": _z(f_full), "corp": _z(f_corp)})
-                st.success("保存しました。")
+                st.toast("保存しました。", icon=":material/check:")
                 st.rerun()
 
 
@@ -321,7 +322,7 @@ def _persons_block(company_kind: str, office_id: str) -> None:
                 "現任": st.column_config.CheckboxColumn(
                     "現任", help="外すと異動済になります。過去の記録はこの人に残ります"),
                 "後任": st.column_config.TextColumn("後任", disabled=True),
-                "接触回数": count("接触回数", disabled=True),
+                "接触回数": count("やりとり", disabled=True),
             })
         edit_cols = ["氏名", "かな", "役職", "電話", "メール", "現任"]
         changed = _changed(edited[edit_cols], cur[edit_cols])
@@ -340,7 +341,7 @@ def _persons_block(company_kind: str, office_id: str) -> None:
                       "role": _z(edited.at[i, "役職"]), "phone": _z(edited.at[i, "電話"]),
                       "email": _z(edited.at[i, "メール"]),
                       "cur": bool(edited.at[i, "現任"])})
-            st.success(f"{n} 名を更新しました。")
+            st.toast(f"{n} 名を更新しました。", icon=":material/check:")
             st.rerun()
 
         _person_memo_block(office_id, cur)
@@ -356,12 +357,12 @@ def _persons_block(company_kind: str, office_id: str) -> None:
                 a_role = cc[0].text_input("役職")
                 a_tel = cc[1].text_input("電話")
                 a_mail = cc[2].text_input("メール")
-                if st.form_submit_button("追加する", type="primary"):
+                if st.form_submit_button("担当者を追加", type="primary"):
                     if not a_name.strip():
                         st.error("氏名を入力してください。")
                     else:
                         _insert_person(office_id, a_name, a_kana, a_role, a_tel, a_mail)
-                        st.success(f"{a_name.strip()} さんを追加しました。")
+                        st.toast(f"{a_name.strip()} さんを追加しました。", icon=":material/check:")
                         st.rerun()
 
     live = cur[cur["現任"].fillna(True)] if not cur.empty else cur
@@ -378,7 +379,7 @@ def _persons_block(company_kind: str, office_id: str) -> None:
                     s_kana = cc[0].text_input("後任のかな")
                     s_role = cc[1].text_input("後任の役職")
                     s_tel = cc[2].text_input("後任の電話")
-                    if st.form_submit_button("引き継ぐ", type="primary"):
+                    if st.form_submit_button("引き継ぎを保存", type="primary"):
                         if not s_name.strip():
                             st.error("後任の氏名を入力してください。")
                         else:
@@ -392,7 +393,7 @@ def _persons_block(company_kind: str, office_id: str) -> None:
                                  where id = :old
                             """, {"new": new_id,
                                   "old": str(live.loc[live["氏名"] == old, "id"].iloc[0])})
-                            st.success(f"{old} さん → {s_name.strip()} さんへ引き継ぎました。")
+                            st.toast(f"{old} さん → {s_name.strip()} さんへ引き継ぎました。", icon=":material/check:")
                             st.rerun()
 
 
@@ -409,11 +410,11 @@ def _person_memo_block(office_id: str, cur: pd.DataFrame) -> None:
         i = cur.index[cur["氏名"] == who][0]
         before = cur.at[i, "まとめメモ"] or ""
         txt = st.text_area("まとめメモ", before, height=120, key=f"pm_txt_{office_id}_{who}")
-        if st.button("保存", type="primary", disabled=(txt == before),
+        if st.button("担当者のまとめメモを保存", type="primary", disabled=(txt == before),
                      key=f"pm_save_{office_id}_{who}"):
             execute("update re_persons set memo = :m, updated_at = now() where id = :id",
                     {"m": _z(txt), "id": str(cur.at[i, "id"])})
-            st.success(f"{who} さんのまとめメモを保存しました。")
+            st.toast(f"{who} さんのまとめメモを保存しました。", icon=":material/check:")
             st.rerun()
 
 
@@ -609,7 +610,7 @@ def _interactions_block(company_kind: str, office_id: str) -> None:
                            and result is not distinct from :old
                     """, {"iid": iid, "new": new_content,
                           "old": _z(hist.at[i, "内容"])})
-                st.success(f"{n} 件を更新しました。")
+                st.toast(f"{n} 件を更新しました。", icon=":material/check:")
                 st.rerun()
 
 
@@ -697,7 +698,7 @@ def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
                  where id = :id
             """, {"id": str(res.at[i, "id"]), "r": _z(edited.at[i, "メモ結果"]),
                   "amt": amt})
-        st.success(f"{n} 件を更新しました。")
+        st.toast(f"{n} 件を更新しました。", icon=":material/check:")
         st.rerun()
 
 
@@ -738,7 +739,7 @@ def _persons_link_block(office_id: str, hist: pd.DataFrame) -> None:
                     values (cast(:id as uuid), cast(:iid as uuid), :pid)
                 """, {"id": str(uuid.uuid4()), "iid": iid,
                       "pid": str(ppl.loc[ppl["氏名"] == nm, "id"].iloc[0])})
-            st.success("保存しました。")
+            st.toast("保存しました。", icon=":material/check:")
             st.rerun()
 
 
@@ -775,18 +776,18 @@ def _add_interaction_block(company_kind: str, office_id: str) -> None:
                                       step=100.0, format="%.0f", key=f"ix_amt_{fk}",
                                       help="銀行打診のとき、聞けた金額があれば")
             a_content = st.text_area(
-                "全般・担当者の話", height=100, key=f"ix_content_{fk}",
-                help="この取引先や担当者についての話（異動、対応の様子、取引姿勢など）")
+                "やりとりの内容（相手先で共通）", height=100, key=f"ix_content_{fk}",
+                help="この取引先や担当者についての話（異動、対応の様子、取引姿勢など）。物件によらない話はこちら")
             a_prop_note = st.text_area(
-                "物件についての内容", height=100, key=f"ix_pnote_{fk}",
+                "物件ごとのメモ", height=100, key=f"ix_pnote_{fk}",
                 help="選んだ物件についての話。複数選んだときは、全部に同じ文が入ります。"
                      "物件ごとに変えたいときは、記録後に「物件ごとのメモ・結果」で直せます")
             if st.form_submit_button("記録する", type="primary"):
                 if not a_content.strip() and not a_prop_note.strip():
-                    st.error("「全般・担当者の話」か「物件についての内容」のどちらかを入力してください。")
+                    st.error("「やりとりの内容」か「物件ごとのメモ」のどちらかを入力してください。")
                     return
                 if a_prop_note.strip() and not a_props:
-                    st.error("「物件についての内容」を入れるときは、関係する物件を選んでください。")
+                    st.error("「物件ごとのメモ」を入れるときは、関係する物件を選んでください。")
                     return
                 iid = str(uuid.uuid4())
                 execute("""

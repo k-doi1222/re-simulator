@@ -34,10 +34,10 @@ if office_id:
 st.divider()
 
 # ══ 横断で見る ═════════════════════════════════════════════
-with st.expander("会社・拠点の一覧（最終接触からの経過が長い順）"):
+with st.expander("会社・拠点の一覧（最後のやりとりからの経過が長い順）"):
     render_offices("rental_agency", show_referrals=False)
 
-with st.expander("聞いた話を横断で見る"):
+with st.expander("やりとりを横断で見る"):
     render_history(["rental_hearing"], "rental_agency",
                    hint="例：美濃加茂 / 外国人 / 空室")
 

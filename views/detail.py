@@ -190,10 +190,10 @@ def render_summary():
             value=float(num(prop["negotiated_price"]) or purchase_price or 0),
             step=10.0, format="%.0f", key=f"ar_{prop['id']}")
     with c[2]:
-        if st.button("保存", type="primary", width="stretch"):
+        if st.button("指値後価格を保存", type="primary", width="stretch"):
             execute("update re_properties set negotiated_price = :ar, updated_at = now() "
                     "where id = :id", {"ar": ar, "id": str(prop["id"])})
-            st.success("保存しました")
+            st.toast("保存しました", icon=":material/check:")
             st.rerun()
 
     if not purchase_price:
@@ -378,7 +378,7 @@ def render_memo():
             where id = :id
         """, {"memo": blank_to_none(m_memo), "broker": blank_to_none(m_broker),
               "id": str(prop["id"])})
-        st.success("保存しました。")
+        st.toast("保存しました。", icon=":material/check:")
         st.rerun()
 
 
@@ -517,7 +517,7 @@ def _content_blocks(part: pd.DataFrame) -> None:
             if head:
                 st.caption(head)
             with st.form(key=f"ixc_c_{iid}", border=False):
-                new_s = st.text_area("この接触の内容（相手先で共通）", value=shared,
+                new_s = st.text_area("やりとりの内容（相手先で共通）", value=shared,
                                      height=_ta_height(shared, 100, 600))
                 if others:
                     # content は接触ごとに共有。ここを直すと他物件の詳細でも変わる。
@@ -1072,7 +1072,7 @@ def render_edit_form():
             "scenario_label": blank_to_none(f_label),
             "input_memo": blank_to_none(f_input_memo),
         })
-        st.success("保存しました。")
+        st.toast("保存しました。", icon=":material/check:")
         st.rerun()
 
     if txt(prop["name_raw"]) and prop["name_raw"] != prop["name"]:

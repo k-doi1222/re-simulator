@@ -62,7 +62,7 @@ def render_offices(kind: str, *, show_referrals: bool) -> None:
     df["経過日数"] = (today - pd.to_datetime(df["最終接触"])).dt.days
 
     c = st.columns([2, 2, 4])
-    only_contacted = c[0].toggle("接触実績のある先だけ", value=False, key=f"oc_{kind}")
+    only_contacted = c[0].toggle("やりとりのある先だけ", value=False, key=f"oc_{kind}")
     also_both = c[1].toggle("兼業の先も表示", value=True, key=f"ob_{kind}",
                             help="売買と賃貸を兼ねている会社など")
     kw = c[2].text_input("会社名・拠点名で検索", key=f"kw_{kind}")
@@ -87,8 +87,8 @@ def render_offices(kind: str, *, show_referrals: bool) -> None:
                      on_select="rerun", selection_mode="single-row",
                      key=f"offices_{kind}",
                      column_config={
-                         "経過日数": count("最終接触からの日数", " 日"),
-                         "接触回数": count("接触回数"),
+                         "経過日数": count("最後のやりとりからの日数", " 日"),
+                         "接触回数": count("やりとり"),
                          "紹介数": count("紹介数"),
                          "検討値": count("うち◎○△", help="紹介物件のうち検討値に届いた件数"),
                      })
@@ -187,6 +187,6 @@ def render_persons(company_kind: str) -> None:
                 | sh["会社"].fillna("").str.contains(kw, case=False, na=False)]
     st.caption(f"{len(sh):,} 名")
     st.dataframe(sh, width="stretch", hide_index=True,
-                column_config={"接触回数": count("接触回数")})
+                column_config={"接触回数": count("やりとり")})
 
     st.caption("直すのは、上の「取引先を選ぶ」で拠点を選んだカルテの中で行います。")

@@ -98,7 +98,7 @@ with st.expander("支店を探す（303支店から絞り込む）"):
         clear_selection("bank_list")   # 消さないと同じ行を選び続けて再描画が止まらない
         st.rerun()
 
-with st.expander("打診の結果を横断で見る"):
+with st.expander("やりとりを横断で見る"):
     st.caption("1つの物件を複数の銀行へ打診した結果です。"
               "行を選ぶと、その物件の詳細へ移動します。")
 

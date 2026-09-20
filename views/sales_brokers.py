@@ -34,7 +34,7 @@ if office_id:
 st.divider()
 
 # ══ 横断で見る ═════════════════════════════════════════════
-with st.expander("会社・拠点の一覧（最終接触からの経過が長い順）"):
+with st.expander("会社・拠点の一覧（最後のやりとりからの経過が長い順）"):
     render_offices("sales_broker", show_referrals=True)
 
 with st.expander("やりとりを横断で見る"):
