@@ -570,82 +570,81 @@ def _interactions_block(company_kind: str, office_id: str) -> None:
     ikind = KIND_OF[company_kind]
     hist = interactions_of(office_id, ikind)
     if hist.empty:
-        st.caption("まだ記録がありません。下の「やりとりを記録する」から追加できます。")
-    else:
-        hist["種別"] = hist["kind"].map(KIND_LABEL).fillna(hist["kind"])
-        hist["日付"] = _dstr(hist["日付"])
-        hist = _blank(hist, ["手段", "内容", "相手", "物件"])
+        st.caption("まだ記録がありません。上の「＋ やりとりを記録」から追加できます。")
+        return
+    hist["種別"] = hist["kind"].map(KIND_LABEL).fillna(hist["kind"])
+    hist["日付"] = _dstr(hist["日付"])
+    hist = _blank(hist, ["手段", "内容", "相手", "物件"])
 
-        full = st.toggle("全文で表示", value=True, key=f"ix_full_{office_id}",
-                         help="オフにすると表になり、日付・手段・内容や物件ごとのメモを直せます")
-        if full:
-            st.markdown("###### 担当者ごと")
-            if hist["内容"].astype(str).str.strip().eq("").all():
-                st.caption("本文のある記録はまだありません。")
-            ppl = persons_of(office_id)
-            _full_cards(hist, {r["氏名"]: r["まとめメモ"] for _, r in ppl.iterrows()
-                               if isinstance(r["まとめメモ"], str) and r["まとめメモ"].strip()})
-            st.caption("文章を直したいときは、上の「全文で表示」をオフにしてください。")
-        else:
-            # 種別はこのカルテ内で全部同じなので列には出さない（見出しに出ている）。
-            # 「どの物件の話か」は手段より先に知りたいので、相手のすぐ隣に置く。
-            # 内容が主役なので最後に置き、幅を指定せず残りを全部使わせる。
-            cols = ["日付", "相手", "物件", "手段", "内容"]
-            edited = st.data_editor(
-                hist[cols], width="stretch", hide_index=True,
-                key=f"ix_ed_{office_id}",
-                column_config={
-                    "日付": st.column_config.TextColumn(
-                        "日付", width=95,
-                        help="2026-08-01 のように入れます。空欄にすると日付なしになります"),
-                    "相手": st.column_config.TextColumn("相手", disabled=True, width=95,
-                                                        help="下の「相手を付け替える」で変えられます"),
-                    "物件": st.column_config.TextColumn("物件", disabled=True, width=170),
-                    "手段": st.column_config.SelectboxColumn("手段", options=METHODS,
-                                                              width=80),
-                    "内容": st.column_config.TextColumn("内容"),
-                })
-            edit_cols = ["日付", "手段", "内容"]
-            changed = _changed(edited[edit_cols], hist[edit_cols])
-            n = int(changed.sum())
-            st.caption("日付・手段・内容はこの表で直せます。"
-                      "内容を直すと、その内容をそのまま写していた「物件ごとの結果」も一緒に直します。")
-            if st.button(f"やりとりの変更を保存（{n} 件）", type="primary", disabled=(n == 0),
-                         key=f"ix_save_{office_id}"):
-                for i in edited.index[changed]:
-                    iid = str(hist.at[i, "id"])
-                    new_content = _z(edited.at[i, "内容"])
-                    execute("""
-                        update re_interactions
-                           set occurred_on = :on, method = :method, content = :content
-                         where id = cast(:iid as uuid)
-                    """, {"iid": iid, "on": _d(edited.at[i, "日付"]),
-                          "method": _z(edited.at[i, "手段"]), "content": new_content})
-                    # 銀行打診は移行時に content を物件側の result へそのまま写している。
-                    # 写しのままのものだけ追随させる（個別に直された結果は触らない）。
-                    execute("""
-                        update re_interaction_properties
-                           set result = :new
-                         where interaction_id = cast(:iid as uuid)
-                           and result is not distinct from :old
-                    """, {"iid": iid, "new": new_content,
-                          "old": _z(hist.at[i, "内容"])})
-                st.toast(f"{n} 件を更新しました。", icon=":material/check:")
-                st.rerun()
+    # 読む形を既定にする（直すのは各記録の日付の行から。トグルでの切り替えはやめた）。
+    st.markdown("###### 担当者ごと")
+    if hist["内容"].astype(str).str.strip().eq("").all():
+        st.caption("本文のある記録はまだありません。")
+    ppl = persons_of(office_id)
+    _full_cards(hist, {r["氏名"]: r["まとめメモ"] for _, r in ppl.iterrows()
+                       if isinstance(r["まとめメモ"], str) and r["まとめメモ"].strip()})
+
+    _results_block(office_id, ikind)
+    _persons_link_block(office_id, hist)
+
+    # 棚卸しのように一気に直したいときのための表。ふだんは畳んでおく。
+    with st.expander("まとめて表で直す"):
+        _interactions_table(office_id, hist)
+        _results_table(office_id, ikind)
 
 
-        _results_block(office_id, ikind, full)
-        _persons_link_block(office_id, hist)
+def _interactions_table(office_id: str, hist: pd.DataFrame) -> None:
+    # 種別はこのカルテ内で全部同じなので列には出さない（見出しに出ている）。
+    # 「どの物件の話か」は手段より先に知りたいので、相手のすぐ隣に置く。
+    # 内容が主役なので最後に置き、幅を指定せず残りを全部使わせる。
+    cols = ["日付", "相手", "物件", "手段", "内容"]
+    edited = st.data_editor(
+        hist[cols], width="stretch", hide_index=True,
+        key=f"ix_ed_{office_id}",
+        column_config={
+            "日付": st.column_config.TextColumn(
+                "日付", width=95,
+                help="2026-08-01 のように入れます。空欄にすると日付なしになります"),
+            "相手": st.column_config.TextColumn("相手", disabled=True, width=95,
+                                                help="下の「相手を付け替える」で変えられます"),
+            "物件": st.column_config.TextColumn("物件", disabled=True, width=170),
+            "手段": st.column_config.SelectboxColumn("手段", options=METHODS,
+                                                      width=80),
+            "内容": st.column_config.TextColumn("内容"),
+        })
+    edit_cols = ["日付", "手段", "内容"]
+    changed = _changed(edited[edit_cols], hist[edit_cols])
+    n = int(changed.sum())
+    st.caption("日付・手段・内容はこの表で直せます。"
+              "内容を直すと、その内容をそのまま写していた「物件ごとの結果」も一緒に直します。")
+    if st.button(f"やりとりの変更を保存（{n} 件）", type="primary", disabled=(n == 0),
+                 key=f"ix_save_{office_id}"):
+        for i in edited.index[changed]:
+            iid = str(hist.at[i, "id"])
+            new_content = _z(edited.at[i, "内容"])
+            execute("""
+                update re_interactions
+                   set occurred_on = :on, method = :method, content = :content
+                 where id = cast(:iid as uuid)
+            """, {"iid": iid, "on": _d(edited.at[i, "日付"]),
+                  "method": _z(edited.at[i, "手段"]), "content": new_content})
+            # 銀行打診は移行時に content を物件側の result へそのまま写している。
+            # 写しのままのものだけ追随させる（個別に直された結果は触らない）。
+            execute("""
+                update re_interaction_properties
+                   set result = :new
+                 where interaction_id = cast(:iid as uuid)
+                   and result is not distinct from :old
+            """, {"iid": iid, "new": new_content,
+                  "old": _z(hist.at[i, "内容"])})
+        st.toast(f"{n} 件を更新しました。", icon=":material/check:")
+        st.rerun()
 
 
 
-def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
-    """物件ごとのメモ・結果（re_interaction_properties.result）。1接触×1物件で持つ。
 
-    銀行なら可否・金額、賃貸・売買なら「その物件についての所感」など、
-    やりとりのうち物件ごとに分けて残したいこと。融資可能額は銀行のときだけ出す。
-    """
-    is_bank = ikind == "bank_inquiry"
+def _results_of(office_id: str, ikind: str) -> pd.DataFrame:
+    """物件ごとのメモ（re_interaction_properties.result）。1やりとり×1物件で持つ。"""
     res = query("""
         select ip.id, ip.interaction_id, coalesce(pr.name, ip.property_name_raw) as 物件,
                i.occurred_on as 日付, i.method as 手段, i.content as 内容共通,
@@ -661,43 +660,59 @@ def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
         order by i.occurred_on desc nulls last, 2
     """, {"oid": office_id, "ikind": ikind})
     if res.empty:
-        return
+        return res
     res = _blank(res, ["物件", "メモ結果", "相手", "手段", "内容共通"])
     res["日付"] = _dstr(res["日付"])
     res["融資可能額"] = pd.to_numeric(res["融資可能額"], errors="coerce")
+    return res
 
+
+def _results_block(office_id: str, ikind: str) -> None:
+    """物件ごとのメモを読む形で出す。直すのは各メモの日付の行から。
+
+    銀行なら可否・金額、賃貸・売買なら「その物件についての所感」など、
+    やりとりのうち物件ごとに分けて残したいこと。
+    """
+    is_bank = ikind == "bank_inquiry"
+    res = _results_of(office_id, ikind)
+    if res.empty:
+        return
     shown = int((res["メモ結果"].astype(str).str.strip() != "").sum())
     # 担当者ごとと同じ見出しの重さで並べる（折りたたみ枠に入れると枠が二重になる）
     st.markdown("###### 物件ごと")
-    # 件数はモードで変えない。「何を数えたか」が分からなくなるため。
+    # 件数は数え方を変えない。「何を数えたか」が分からなくなるため。
     st.caption(f"メモのある {shown} 件（やりとり全 {len(res)} 件）　—　"
                "やりとりのうち物件ごとに分けて残したいこと"
                "（銀行の可否・金額、業者の物件評価など）。物件詳細にも同じものが出ます。")
-    if full:
-        # やりとりの全文表示と同じ形にする（枠は物件ごとに1つ。
-        # 日付・相手・融資可能額は各メモの末尾に灰色で添え、中を日付で区切らない）。
-        # 中身が空のものは出さない。全部空の物件は枠ごと出さない。
-        live = res[res["メモ結果"].astype(str).str.strip() != ""]
-        for prop, g in live.groupby(live["物件"].replace("", "物件の記録なし"), sort=False):
-            with st.container(border=True):
-                st.markdown(f"**{_full(prop)}**")
-                for _, r in g.iterrows():
-                    memo = str(r["メモ結果"]).strip()
-                    amt = r["融資可能額"]
-                    note = "・".join(x for x in [
-                        str(r["日付"]) or "日付なし", str(r["相手"]),
-                        f"融資可能額 {amt:,.0f} 万円" if pd.notna(amt) else ""] if x)
-                    st.markdown(_full(memo))
-                    edit_popover(f"（{note}）", iid=r["interaction_id"], ip_id=r["id"],
-                                 on=r["日付"], method=r["手段"], content=r["内容共通"],
-                                 result=r["メモ結果"], amount=amt, is_bank=is_bank)
+    # 枠は物件ごとに1つ。中を日付で区切らず、日付・相手・融資可能額は末尾に灰色で添える。
+    # 中身が空のものは出さない。全部空の物件は枠ごと出さない。
+    live = res[res["メモ結果"].astype(str).str.strip() != ""]
+    for prop, g in live.groupby(live["物件"].replace("", "物件の記録なし"), sort=False):
+        with st.container(border=True):
+            st.markdown(f"**{_full(prop)}**")
+            for _, r in g.iterrows():
+                amt = r["融資可能額"]
+                note = "・".join(x for x in [
+                    str(r["日付"]) or "日付なし", str(r["相手"]),
+                    f"融資可能額 {amt:,.0f} 万円" if pd.notna(amt) else ""] if x)
+                st.markdown(_full(str(r["メモ結果"]).strip()))
+                edit_popover(f"（{note}）", iid=r["interaction_id"], ip_id=r["id"],
+                             on=r["日付"], method=r["手段"], content=r["内容共通"],
+                             result=r["メモ結果"], amount=amt, is_bank=is_bank)
+
+
+def _results_table(office_id: str, ikind: str) -> None:
+    """物件ごとのメモを表でまとめて直す。ふだんは「まとめて表で直す」の中に畳んである。"""
+    is_bank = ikind == "bank_inquiry"
+    res = _results_of(office_id, ikind)
+    if res.empty:
         return
     cols = ["物件", "日付", "相手", "メモ結果"] + (["融資可能額"] if is_bank else [])
     conf = {
         "物件": st.column_config.TextColumn("物件", disabled=True, width=200),
         "日付": st.column_config.TextColumn("日付", disabled=True, width=110),
         "相手": st.column_config.TextColumn("相手", disabled=True, width=95),
-        "メモ結果": st.column_config.TextColumn("メモ・結果"),
+        "メモ結果": st.column_config.TextColumn("物件ごとのメモ"),
     }
     if is_bank:
         conf["融資可能額"] = money("融資可能額")
@@ -706,7 +721,7 @@ def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
     edit_cols = ["メモ結果"] + (["融資可能額"] if is_bank else [])
     changed = _changed(edited[edit_cols], res[edit_cols])
     n = int(changed.sum())
-    if st.button(f"物件ごとのメモ・結果を保存（{n} 件）", type="primary",
+    if st.button(f"物件ごとのメモを保存（{n} 件）", type="primary",
                  disabled=(n == 0), key=f"rs_save_{office_id}"):
         for i in edited.index[changed]:
             amt = _num(edited.at[i, "融資可能額"]) if is_bank \
