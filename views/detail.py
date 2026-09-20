@@ -482,6 +482,12 @@ def _content_blocks(part: pd.DataFrame) -> None:
     part = part[part["interaction_id"].notna()]
     if part.empty:
         return
+    # 担当者のまとめメモ（第2層）は拠点カルテにしか無かったので、この画面にも出す。
+    # 人についての話を第2層へ移すと、物件詳細から見えなくなってしまうため。
+    memos = query("""
+        select name, memo from re_persons
+         where memo is not null and btrim(memo) <> ''
+    """).set_index("name")["memo"].to_dict()
     # 日付なしはその人についての恒常的な話であることが多いので、枠の先頭に置く
     part = part.assign(_nodate=part["日付"].astype(str).str.strip().eq(""))
     part = part.sort_values("_nodate", ascending=False, kind="stable")
@@ -496,6 +502,14 @@ def _content_blocks(part: pd.DataFrame) -> None:
         title = "　".join(x for x in place + [str(name)] if x and x != "nan")
         with st.container(border=True):
             st.markdown(f"**{full_text(title)}**")
+            notes = [f"{nm}：{memos[nm]}" if " / " in str(name) else memos[nm]
+                     for nm in str(name).split(" / ") if memos.get(nm)]
+            if notes:
+                # 拠点カルテと同じ形：上段が「今どうなっているか」、下は日付つきの記録
+                st.caption("この人について")
+                st.markdown(full_text("\n".join(notes)))
+                st.divider()
+                st.caption("やりとり")
             for _, r in g.iterrows():
                 shared = str(r.get("内容共通", "") or "").strip()
                 per_prop = str(r.get("物件結果", "") or "").strip()
