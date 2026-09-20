@@ -502,6 +502,35 @@ def _full(text) -> str:
 
 full_text = _full   # 物件詳細からも同じ整形を使う（改行そのまま・Markdown解釈なし）
 
+_URL = re.compile(r"(https?://[^\s<]+)")
+MEMO_FOLD_CHARS = 400   # これより長いまとめメモは畳む
+MEMO_HEAD_LINES = 3     # 畳んだときに見せる行数
+
+
+def memo_block(text: str) -> None:
+    """担当者のまとめメモ（第2層）を出す。長いものは先頭だけ見せて畳む。
+
+    人によっては経歴・人柄が数千字になる（狩山さんの例で約2,000字）。
+    全部出すと、その下の日付つきの記録まで届かない。
+    折りたたみは枠の中に置くので、「人ごとに1枠」の見え方は変わらない。
+    st.expander を使うと枠が二重になるため、HTML の details で作る。
+    ボタンではないので、開閉しても画面が再描画されない。
+    """
+    body = (text or "").strip()
+    if not body:
+        return
+    esc = lambda t: (t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+    fmt = lambda t: _URL.sub(r'<a href="\1" target="_blank">\1</a>',
+                             esc(t)).replace("\n", "<br>")
+    if len(body) <= MEMO_FOLD_CHARS:
+        st.html(f'<div class="memo">{fmt(body)}</div>')
+        return
+    lines = body.split("\n")
+    head, rest = "\n".join(lines[:MEMO_HEAD_LINES]), "\n".join(lines[MEMO_HEAD_LINES:])
+    st.html(f'<div class="memo">{fmt(head)}'
+            f'<details class="memo-more"><summary></summary>{fmt(rest)}</details></div>')
+
+
 
 def _full_cards(hist: pd.DataFrame, memos: dict | None = None) -> None:
     """やりとりを担当者ごとに1枠にまとめ、全文で読める形で並べる。
@@ -516,8 +545,10 @@ def _full_cards(hist: pd.DataFrame, memos: dict | None = None) -> None:
     memos = memos or {}
     # 話が空の回は出さない（名前だけの枠も作らない）。物件メモや表の方で見られる。
     hist = hist[hist["内容"].astype(str).str.strip() != ""]
+    shown = set()
     # hist は新しい順。枠の並びも「最近話した相手」順になる。
     for who, g in hist.groupby(hist["相手"].replace("", "相手の記録なし"), sort=False):
+        shown.update(str(who).split(" / "))
         with st.container(border=True):
             st.markdown(f"**{_full(who)}**")
             # 枠の上段は「今どうなっているか」（担当者のまとめメモ）。
@@ -528,7 +559,7 @@ def _full_cards(hist: pd.DataFrame, memos: dict | None = None) -> None:
             # 名札はまとめメモがあるときだけ。未記入の行を毎回出すとうるさい。
             if notes:
                 st.caption("この人について")
-                st.markdown(_full("\n".join(notes)))
+                memo_block("\n".join(notes))
                 st.divider()
                 st.caption("やりとり")
             for _, r in g.iterrows():
@@ -536,6 +567,16 @@ def _full_cards(hist: pd.DataFrame, memos: dict | None = None) -> None:
                 st.markdown(_full(r["内容"]))
                 edit_popover(f"（{note}）", iid=r["id"], on=r["日付"], method=r["手段"],
                              content=r["内容"])
+
+    # まとめメモはあるが、本文のあるやりとりが無い人。枠が出ないと書いたメモを
+    # 本人が二度と読めない（本文を第2層へ移した人がこれに当たる）。
+    for nm, memo in memos.items():
+        if nm in shown:
+            continue
+        with st.container(border=True):
+            st.markdown(f"**{_full(nm)}**")
+            st.caption("この人について")
+            memo_block(memo)
 
 
 def edit_popover(label: str, *, iid, on=None, method=None, content=None,

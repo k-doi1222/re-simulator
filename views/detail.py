@@ -18,7 +18,7 @@ import streamlit as st
 from auth import require_password
 from db import execute, query, refresh_calc_cache
 from nav import goto_office_edit
-from office_card import METHODS, edit_popover, full_text
+from office_card import METHODS, edit_popover, full_text, memo_block
 from theme import CALC_BG, compact_css, money, ratio
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
@@ -507,7 +507,7 @@ def _content_blocks(part: pd.DataFrame) -> None:
             if notes:
                 # 拠点カルテと同じ形：上段が「今どうなっているか」、下は日付つきの記録
                 st.caption("この人について")
-                st.markdown(full_text("\n".join(notes)))
+                memo_block("\n".join(notes))
                 st.divider()
                 st.caption("やりとり")
             for _, r in g.iterrows():

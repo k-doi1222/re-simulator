@@ -43,6 +43,19 @@ def compact_css(table_vh: str = TABLE_VH) -> None:
       div[class*="st-key-editline"] button:hover p,
       div[class*="st-key-editline"] button:hover span {{ color: #1d1d1f; }}
 
+      /* 担当者のまとめメモ（第2層）。長いものは「続きを読む」で畳む。
+         枠を増やさないよう、Streamlitのexpanderではなく details で作っている。 */
+      .memo {{ line-height: 1.6; }}
+      .memo a {{ color: inherit; }}
+      details.memo-more > summary {{
+          list-style: none; cursor: pointer; color: #888; font-size: 0.8rem;
+          margin-top: 0.2rem;
+      }}
+      details.memo-more > summary::-webkit-details-marker {{ display: none; }}
+      details.memo-more > summary::after {{ content: "続きを読む ▾"; }}
+      details.memo-more[open] > summary::after {{ content: "閉じる ▴"; }}
+      details.memo-more > summary:hover {{ color: inherit; }}
+
       /* 一覧の表を画面下端まで伸ばす。
          ページ側で key="fulltable..." の枠に入れた表が対象（前方一致で拾う）。 */
       div[class*="st-key-fulltable"] div[data-testid="stDataFrameResizable"] {{
