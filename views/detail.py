@@ -28,7 +28,7 @@ compact_css()
 RAW_COLS = """
     p.id, p.excel_row, p.name, p.name_raw, p.address, p.structure, p.reply_date,
     p.zoning, p.status, p.source_office_id, p.source_person_id,
-    p.memo, p.input_memo, p.broker_comment, p.bank_inquiry_result,
+    p.memo, p.input_memo, p.import_note, p.broker_comment, p.bank_inquiry_result,
     p.contact_method, p.inquiry_channel,
     p.purchase_price, p.negotiated_price, p.land_area, p.road_price_actual,
     p.zone_coef, p.shape_coef,
@@ -277,7 +277,8 @@ def render_summary():
     # 元Excel行（excel_row）はDBに残すが、画面には出さない。
     # 移行の名残で、今は見ても使い道がないため（2026-09-20）。
     st.caption(f"構造 {txt(prop['structure']) or '未設定'}"
-              f"・法定耐用年数 {prop['useful_life']:.0f}年")
+              f"・法定耐用年数 {prop['useful_life']:.0f}年"
+              + (f"　／　{one_line(prop['import_note'])}" if txt(prop["import_note"]) else ""))
     return ar, row
 
 
@@ -993,8 +994,10 @@ def render_edit_form():
 
         # AA 入力メモ ＋ 版のラベル
         c = st.columns([3, 2])
-        f_input_memo = c[0].text_input("入力メモ", txt(prop["input_memo"]),
-                                       help="満室年収の計算根拠など、数値の出どころのメモ")
+        f_input_memo = c[0].text_input(
+            "入力メモ", txt(prop["input_memo"]),
+            help="この物件の値を入れるときの覚書。満室年収の計算根拠、"
+                 "エレベーターの有無が不明、など。自動登録の記録はここには入れない")
         f_label = c[1].text_input("版のラベル", txt(prop["scenario_label"]),
                                   help="例：サブリース解除後／2025年版／現地確認反映")
 
