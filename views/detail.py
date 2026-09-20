@@ -919,7 +919,7 @@ def render_edit_form():
     # 入手経路の選択肢は re_inquiry_channels が持つ。増やすときはあの表に行を足す。
     channels = query("select name, description from re_inquiry_channels order by sort_order")
 
-    with st.form(key=f"edit_{prop['id']}"):
+    with st.expander("物件情報を直す"), st.form(key=f"edit_{prop['id']}"):
         # B / C / D ＋ X / Y
         c = st.columns([2, 3, 3, 2, 2])
         # 元Excelの列名は「返信日付」だが、実態はこのDBに登録した日付なので画面上は「登録日付」
