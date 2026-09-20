@@ -216,11 +216,17 @@ def _summary_memo(notes) -> None:
     """
     t = "" if notes is None or (isinstance(notes, float) and pd.isna(notes)) else str(notes)
     body = "\n".join(ln for ln in t.splitlines() if not _EXCEL_ROW.match(ln.strip())).strip()
-    with st.container(border=True):
-        st.markdown(_full(body) if body
-                    else ":gray[この拠点のまとめメモはまだありません]")
-    # 案内は枠の下に置く。上に置くと見出しのように見えてしまう。
-    st.caption("店の性格・場所・作戦など、日付で変わりにくい話。直すときは「拠点の情報を直す」から")
+    if body:
+        with st.container(border=True):
+            st.markdown(_full(body))
+        # 案内は枠の下に置く。上に置くと見出しのように見えてしまう。
+        st.caption("店の性格・場所・作戦など、日付で変わりにくい話。"
+                  "直すときは「拠点の情報を直す」から")
+    else:
+        # 空のときは枠を出さない（中身がある合図が枠なので、空の枠は場所を取るだけ）。
+        # ただし1行は残す。やりとりに「拠点メモ参照」と書かれていることがあり、
+        # 参照先が画面のどこにも無いと辿れなくなるため。
+        st.caption("この拠点のメモはまだありません（「拠点の情報を直す」から書けます）")
 
 
 def _office_info_block(company_kind: str, office_id: str, h: pd.Series) -> None:
@@ -479,11 +485,12 @@ def _full_cards(hist: pd.DataFrame, memos: dict | None = None) -> None:
             # 灰色の小さい字にすると読み飛ばされるので、本文と同じ大きさで出す。
             notes = [f"{nm}：{memos[nm]}" if " / " in str(who) else memos[nm]
                      for nm in str(who).split(" / ") if memos.get(nm)]
-            st.caption("この人について")
-            st.markdown(_full("\n".join(notes)) if notes
-                        else ":gray[（未記入。「担当者のまとめメモを直す」から書けます）]")
-            st.divider()
-            st.caption("やりとり")
+            # 名札はまとめメモがあるときだけ。未記入の行を毎回出すとうるさい。
+            if notes:
+                st.caption("この人について")
+                st.markdown(_full("\n".join(notes)))
+                st.divider()
+                st.caption("やりとり")
             for _, r in g.iterrows():
                 note = "・".join(x for x in [str(r["日付"]) or "日付なし", str(r["手段"])] if x)
                 st.markdown(_full(r["内容"]))
