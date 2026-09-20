@@ -469,7 +469,64 @@ def _full_cards(hist: pd.DataFrame, memos: dict | None = None) -> None:
                 st.divider()
             for _, r in g.iterrows():
                 note = "・".join(x for x in [str(r["日付"]) or "日付なし", str(r["手段"])] if x)
-                st.markdown(f"{_full(r['内容'])}  \n:gray[（{_full(note)}）]")
+                st.markdown(_full(r["内容"]))
+                edit_popover(f"（{note}）", iid=r["id"], on=r["日付"], method=r["手段"],
+                             content=r["内容"])
+
+
+def edit_popover(label: str, *, iid, on=None, method=None, content=None,
+                 ip_id=None, result=None, amount=None, is_bank: bool = False,
+                 key: str = "") -> None:
+    """やりとり1件を、読んでいるその場で直す小窓。
+
+    **読む形を既定にして、直すときだけ小窓を開く**という方針の中心部品。
+    拠点カルテと物件詳細の両方から呼ぶ（中身が同じなので、2画面で操作が揃う）。
+    見た目は日付の注記（灰色の小さい字）のままで、押すと開く。
+    別にボタンを置くと、画面が狭いとき（スマホ）に日付と日付の間へ落ちて読みづらい。
+
+    ip_id を渡すと「物件ごとのメモ」も同じ小窓で直せる（銀行なら融資可能額も）。
+    """
+    k = f"ep_{key or iid}{'_' + str(ip_id) if ip_id else ''}"
+    with st.container(key=f"editline_{k}"), st.popover(label, icon=":material/edit:"):
+        c = st.columns([3, 2])
+        f_on = c[0].text_input("日付", "" if on is None else str(on), key=f"{k}_d",
+                               help="2026-08-01 のように入れます。空欄にすると日付なしになります")
+        f_m = c[1].selectbox("手段", METHODS, key=f"{k}_m",
+                             index=METHODS.index(method) if method in METHODS else None,
+                             placeholder="選ぶ（任意）")
+        f_c = st.text_area("やりとりの内容（相手先で共通）", "" if content is None else str(content),
+                           height=160, key=f"{k}_c",
+                           help="この相手と話したこと。物件によらない話はこちら")
+        f_r = f_amt = None
+        if ip_id:
+            f_r = st.text_area("物件ごとのメモ", "" if result is None else str(result),
+                               height=140, key=f"{k}_r",
+                               help="この物件についての話。銀行なら可否や条件")
+            if is_bank:
+                f_amt = st.number_input("融資可能額（万円）", value=_num(amount),
+                                        step=100.0, format="%.0f", key=f"{k}_a")
+        if st.button("保存", type="primary", key=f"{k}_s"):
+            execute("""
+                update re_interactions
+                   set occurred_on = :on, method = :method, content = :content
+                 where id = cast(:iid as uuid)
+            """, {"iid": str(iid), "on": _d(f_on), "method": _z(f_m), "content": _z(f_c)})
+            # 移行時に content をそのまま物件側へ写したものだけ追随させる。
+            # 個別に直された結果は触らない（この小窓で直した分は次の文で上書きする）。
+            execute("""
+                update re_interaction_properties set result = :new
+                 where interaction_id = cast(:iid as uuid)
+                   and result is not distinct from :old
+            """, {"iid": str(iid), "new": _z(f_c), "old": _z(content)})
+            if ip_id:
+                execute("""
+                    update re_interaction_properties
+                       set result = :r, loanable_amount = :a
+                     where id = cast(:ipid as uuid)
+                """, {"ipid": str(ip_id), "r": _z(f_r),
+                      "a": _num(f_amt) if is_bank else _num(amount)})
+            st.toast("保存しました", icon=":material/check:")
+            st.rerun()
 
 
 def interactions_of(office_id: str, ikind: str) -> pd.DataFrame:
@@ -570,8 +627,9 @@ def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
     """
     is_bank = ikind == "bank_inquiry"
     res = query("""
-        select ip.id, coalesce(pr.name, ip.property_name_raw) as 物件,
-               i.occurred_on as 日付, ip.result as メモ結果, ip.loanable_amount as 融資可能額,
+        select ip.id, ip.interaction_id, coalesce(pr.name, ip.property_name_raw) as 物件,
+               i.occurred_on as 日付, i.method as 手段, i.content as 内容共通,
+               ip.result as メモ結果, ip.loanable_amount as 融資可能額,
                (select string_agg(coalesce(p.name, ipe.person_name_raw), ' / ')
                   from re_interaction_persons ipe
                   left join re_persons p on p.id = ipe.person_id
@@ -584,7 +642,7 @@ def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
     """, {"oid": office_id, "ikind": ikind})
     if res.empty:
         return
-    res = _blank(res, ["物件", "メモ結果", "相手"])
+    res = _blank(res, ["物件", "メモ結果", "相手", "手段", "内容共通"])
     res["日付"] = _dstr(res["日付"])
     res["融資可能額"] = pd.to_numeric(res["融資可能額"], errors="coerce")
 
@@ -609,7 +667,10 @@ def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
                     note = "・".join(x for x in [
                         str(r["日付"]) or "日付なし", str(r["相手"]),
                         f"融資可能額 {amt:,.0f} 万円" if pd.notna(amt) else ""] if x)
-                    st.markdown(f"{_full(memo)}  \n:gray[（{_full(note)}）]")
+                    st.markdown(_full(memo))
+                    edit_popover(f"（{note}）", iid=r["interaction_id"], ip_id=r["id"],
+                                 on=r["日付"], method=r["手段"], content=r["内容共通"],
+                                 result=r["メモ結果"], amount=amt, is_bank=is_bank)
         return
     cols = ["物件", "日付", "相手", "メモ結果"] + (["融資可能額"] if is_bank else [])
     conf = {

@@ -30,6 +30,19 @@ def compact_css(table_vh: str = TABLE_VH) -> None:
       div[data-testid="stVerticalBlock"] {{ gap: 0.5rem; }}
       h4 {{ margin-top: 0.4rem; margin-bottom: 0; }}
 
+      /* やりとり1件の「日付の行＝直すボタン」。灰色の小さい字のまま押せるようにする。
+         ボタンらしさは最小限にして、読むときの邪魔をしない。 */
+      div[class*="st-key-editline"] button {{
+          background: none; border: none; box-shadow: none;
+          padding: 0 0 0.1rem 0; min-height: 0;
+      }}
+      div[class*="st-key-editline"] button p,
+      div[class*="st-key-editline"] button span {{
+          font-size: 0.8rem; color: #888;
+      }}
+      div[class*="st-key-editline"] button:hover p,
+      div[class*="st-key-editline"] button:hover span {{ color: #1d1d1f; }}
+
       /* 一覧の表を画面下端まで伸ばす。
          ページ側で key="fulltable..." の枠に入れた表が対象（前方一致で拾う）。 */
       div[class*="st-key-fulltable"] div[data-testid="stDataFrameResizable"] {{
