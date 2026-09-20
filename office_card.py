@@ -91,12 +91,22 @@ def _blank(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 
 # ── 拠点を選ぶ ──────────────────────────────────────────────
 def office_options(company_kind: str) -> pd.DataFrame:
-    """この種別の拠点の一覧（選択肢用）。やりとりの多い先を上に出す。"""
+    """この種別の拠点の一覧（選択肢用）。やりとりの多い先を上に出す。
+
+    絞り込み用に、会社名・拠点名のほか **担当者名・地域・まとめメモ・紹介物件名** も
+    1つの文字列（探す用）にまとめて持つ。銀行は303支店あり、名前だけでは辿りつけない。
+    """
     return query("""
         select o.id,
                c.name || '　' || coalesce(o.branch_name, '') as label,
                (select count(*) from re_interactions i
-                 where i.office_id = o.id and i.kind = :ikind) as 接触回数
+                 where i.office_id = o.id and i.kind = :ikind) as 接触回数,
+               lower(concat_ws(' ', c.name, o.branch_name, o.region, o.bank_category,
+                      o.address, o.notes,
+                      (select string_agg(pe.name, ' ') from re_persons pe
+                        where pe.office_id = o.id),
+                      (select string_agg(pr.name, ' ') from re_properties pr
+                        where pr.source_office_id = o.id))) as 探す用
         from re_offices o
         join re_companies c on c.id = o.company_id
         where :ckind = any(c.kinds)
@@ -116,9 +126,32 @@ def render_office_picker(company_kind: str) -> str | None:
         st.info("拠点がまだ登録されていません。")
         return None
 
-    labels = offices["label"].tolist()
     key = f"card_off_{company_kind}"
     applied = f"{key}_applied"
+
+    # 選択肢を絞る欄。選択肢が増えると、開いて目で探すのが辛くなるため。
+    # 会社名だけでなく担当者名・物件名・地域・メモでも当たる。
+    q = st.text_input("取引先を探す", key=f"{key}_q",
+                      placeholder="会社名・拠点・担当者・地域・物件名・メモで絞り込む").strip()
+    shown = offices
+    if q:
+        keys = [w for w in q.lower().split() if w]
+        hit = offices["探す用"].fillna("")
+        for w in keys:
+            hit = hit.where(offices["探す用"].fillna("").str.contains(w, regex=False), "")
+        shown = offices[hit != ""]
+        if shown.empty:
+            st.warning("見つかりませんでした。別の言葉で探してください。")
+            shown = offices
+        else:
+            st.caption(f"{len(shown):,} 件に絞り込み（全 {len(offices):,} 件）")
+            # 今の選択が絞り込みから外れたら、先頭の先へ移す。
+            # 選択肢に残すと「探したのに前の先が居座る」形になって紛らわしい。
+            cur = st.session_state.get(key)
+            if cur and cur not in shown["label"].tolist():
+                st.session_state[key] = shown.iloc[0]["label"]
+
+    labels = shown["label"].tolist()
 
     # 外から指定された拠点（物件詳細から飛んできた／一覧で行を選んだ）を反映する。
     # 選び直すのは「指定が変わったとき」と「選択状態そのものが無いとき」だけ。
@@ -133,9 +166,12 @@ def render_office_picker(company_kind: str) -> str | None:
         if len(hit):
             st.session_state[key] = offices.at[hit[0], "label"]
             st.session_state[applied] = str(preset)
+            # 絞り込み中に外から指定が来ても、その先を必ず出せるようにする
+            if offices.at[hit[0], "label"] not in labels:
+                labels = [offices.at[hit[0], "label"]] + labels
 
     label = st.selectbox("取引先を選ぶ", labels, key=key,
-                         help="入力すると絞り込めます")
+                         help="この欄でも直接入力して絞り込めます")
     return str(offices.loc[offices["label"] == label, "id"].iloc[0])
 
 
