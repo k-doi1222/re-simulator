@@ -206,8 +206,9 @@ def _summary_memo(notes) -> None:
     body = "\n".join(ln for ln in t.splitlines() if not _EXCEL_ROW.match(ln.strip())).strip()
     if body:
         with st.container(border=True):
-            st.caption("まとめメモ　—　直すときは「拠点の情報を直す」から")
             st.markdown(_full(body))
+        # 案内は枠の下に置く。上に置くと見出しのように見えてしまう。
+        st.caption("直すときは「拠点の情報を直す」から")
 
 
 def _office_info_block(company_kind: str, office_id: str, h: pd.Series) -> None:
@@ -312,7 +313,7 @@ def _persons_block(company_kind: str, office_id: str) -> None:
     if cur.empty:
         st.caption("まだ登録がありません。下の「担当者を追加」から登録してください。")
     else:
-        cols = ["氏名", "かな", "役職", "電話", "メール", "現任", "後任", "接触回数", "まとめメモ"]
+        cols = ["氏名", "かな", "役職", "電話", "メール", "現任", "後任", "接触回数"]
         edited = st.data_editor(
             cur[cols], width="stretch", hide_index=True,
             key=f"pe_ed_{office_id}",
@@ -321,12 +322,8 @@ def _persons_block(company_kind: str, office_id: str) -> None:
                     "現任", help="外すと異動済になります。過去の記録はこの人に残ります"),
                 "後任": st.column_config.TextColumn("後任", disabled=True),
                 "接触回数": count("接触回数", disabled=True),
-                "まとめメモ": st.column_config.TextColumn(
-                    "まとめメモ", width="large",
-                    help="人柄・勤務形態など、日付で変わりにくいその人の情報。"
-                         "やりとりの全文表示で名前の下にも出ます"),
             })
-        edit_cols = ["氏名", "かな", "役職", "電話", "メール", "現任", "まとめメモ"]
+        edit_cols = ["氏名", "かな", "役職", "電話", "メール", "現任"]
         changed = _changed(edited[edit_cols], cur[edit_cols])
         n = int(changed.sum())
         if st.button(f"担当者の変更を保存（{n} 名）", type="primary", disabled=(n == 0),
@@ -335,17 +332,18 @@ def _persons_block(company_kind: str, office_id: str) -> None:
                 execute("""
                     update re_persons
                        set name = :name, name_kana = :kana, role = :role,
-                           phone = :phone, email = :email, memo = :memo,
+                           phone = :phone, email = :email,
                            is_current = :cur, updated_at = now()
                      where id = :id
                 """, {"id": str(cur.at[i, "id"]),
                       "name": _z(edited.at[i, "氏名"]), "kana": _z(edited.at[i, "かな"]),
                       "role": _z(edited.at[i, "役職"]), "phone": _z(edited.at[i, "電話"]),
                       "email": _z(edited.at[i, "メール"]),
-                      "memo": _z(edited.at[i, "まとめメモ"]),
                       "cur": bool(edited.at[i, "現任"])})
             st.success(f"{n} 名を更新しました。")
             st.rerun()
+
+        _person_memo_block(office_id, cur)
 
     c = st.columns(2)
     with c[0]:
@@ -396,6 +394,27 @@ def _persons_block(company_kind: str, office_id: str) -> None:
                                   "old": str(live.loc[live["氏名"] == old, "id"].iloc[0])})
                             st.success(f"{old} さん → {s_name.strip()} さんへ引き継ぎました。")
                             st.rerun()
+
+
+def _person_memo_block(office_id: str, cur: pd.DataFrame) -> None:
+    """担当者のまとめメモを直す。やりとりの枠の上段に出るのと同じ文。
+
+    表の中に列として持たせると、1行1セルで改行も入れられず書きにくかったので外に出した。
+    """
+    with st.expander("担当者のまとめメモを直す"):
+        st.caption("人柄・役割・勤務の形など、日付で変わりにくいその人の情報。"
+                  "下のやりとりの枠で、名前のすぐ下に出ます。")
+        names = cur["氏名"].tolist()
+        who = st.selectbox("担当者", names, key=f"pm_who_{office_id}")
+        i = cur.index[cur["氏名"] == who][0]
+        before = cur.at[i, "まとめメモ"] or ""
+        txt = st.text_area("まとめメモ", before, height=120, key=f"pm_txt_{office_id}_{who}")
+        if st.button("保存", type="primary", disabled=(txt == before),
+                     key=f"pm_save_{office_id}_{who}"):
+            execute("update re_persons set memo = :m, updated_at = now() where id = :id",
+                    {"m": _z(txt), "id": str(cur.at[i, "id"])})
+            st.success(f"{who} さんのまとめメモを保存しました。")
+            st.rerun()
 
 
 def _insert_person(office_id: str, name, kana, role, phone, email) -> str:
@@ -484,6 +503,7 @@ def _interactions_block(company_kind: str, office_id: str) -> None:
         full = st.toggle("全文で表示", value=True, key=f"ix_full_{office_id}",
                          help="オフにすると表になり、日付・手段・内容や物件ごとのメモを直せます")
         if full:
+            st.markdown("###### 担当者ごと")
             ppl = persons_of(office_id)
             _full_cards(hist, {r["氏名"]: r["まとめメモ"] for _, r in ppl.iterrows()
                                if isinstance(r["まとめメモ"], str) and r["まとめメモ"].strip()})
@@ -568,53 +588,56 @@ def _results_block(office_id: str, ikind: str, full: bool = False) -> None:
     res["日付"] = _dstr(res["日付"])
     res["融資可能額"] = pd.to_numeric(res["融資可能額"], errors="coerce")
 
-    # 物件ごとの記録が主に見たいところなので、最初から開いておく
-    with st.expander(f"物件ごとのメモ・結果（{len(res)} 件）", expanded=True):
-        st.caption("やりとりのうち物件ごとに分けて残したいこと"
-                  "（銀行の可否・金額、業者の物件評価など）。"
-                  "物件詳細の「この物件についての結果・メモ」に出ます。")
-        if full:
-            # やりとりの全文表示と同じ形にする（枠は物件ごとに1つ。
-            # 日付・相手・融資可能額は各メモの末尾に灰色で添え、中を日付で区切らない）。
-            for prop, g in res.groupby(res["物件"].replace("", "物件の記録なし"), sort=False):
-                with st.container(border=True):
-                    st.markdown(f"**{_full(prop)}**")
-                    for _, r in g.iterrows():
-                        amt = r["融資可能額"]
-                        note = "・".join(x for x in [
-                            str(r["日付"]) or "日付なし", str(r["相手"]),
-                            f"融資可能額 {amt:,.0f} 万円" if pd.notna(amt) else ""] if x)
-                        memo = str(r["メモ結果"]).strip()
-                        st.markdown((f"{_full(memo)}  \n" if memo else "")
-                                    + f":gray[（{_full(note)}）]")
-            return
-        cols = ["物件", "日付", "相手", "メモ結果"] + (["融資可能額"] if is_bank else [])
-        conf = {
-            "物件": st.column_config.TextColumn("物件", disabled=True, width=200),
-            "日付": st.column_config.TextColumn("日付", disabled=True, width=110),
-            "相手": st.column_config.TextColumn("相手", disabled=True, width=95),
-            "メモ結果": st.column_config.TextColumn("メモ・結果"),
-        }
-        if is_bank:
-            conf["融資可能額"] = money("融資可能額")
-        edited = st.data_editor(res[cols], width="stretch", hide_index=True,
-                                key=f"rs_ed_{office_id}", column_config=conf)
-        edit_cols = ["メモ結果"] + (["融資可能額"] if is_bank else [])
-        changed = _changed(edited[edit_cols], res[edit_cols])
-        n = int(changed.sum())
-        if st.button(f"物件ごとのメモ・結果を保存（{n} 件）", type="primary",
-                     disabled=(n == 0), key=f"rs_save_{office_id}"):
-            for i in edited.index[changed]:
-                amt = _num(edited.at[i, "融資可能額"]) if is_bank \
-                    else _num(res.at[i, "融資可能額"])
-                execute("""
-                    update re_interaction_properties
-                       set result = :r, loanable_amount = :amt
-                     where id = :id
-                """, {"id": str(res.at[i, "id"]), "r": _z(edited.at[i, "メモ結果"]),
-                      "amt": amt})
-            st.success(f"{n} 件を更新しました。")
-            st.rerun()
+    shown = int((res["メモ結果"].astype(str).str.strip() != "").sum())
+    # 担当者ごとと同じ見出しの重さで並べる（折りたたみ枠に入れると枠が二重になる）
+    st.markdown("###### 物件ごと")
+    st.caption(f"{shown if full else len(res)} 件　—　"
+               "やりとりのうち物件ごとに分けて残したいこと"
+               "（銀行の可否・金額、業者の物件評価など）。"
+               "物件詳細の「この物件についての結果・メモ」に出ます。")
+    if full:
+        # やりとりの全文表示と同じ形にする（枠は物件ごとに1つ。
+        # 日付・相手・融資可能額は各メモの末尾に灰色で添え、中を日付で区切らない）。
+        # 中身が空のものは出さない。全部空の物件は枠ごと出さない。
+        live = res[res["メモ結果"].astype(str).str.strip() != ""]
+        for prop, g in live.groupby(live["物件"].replace("", "物件の記録なし"), sort=False):
+            with st.container(border=True):
+                st.markdown(f"**{_full(prop)}**")
+                for _, r in g.iterrows():
+                    memo = str(r["メモ結果"]).strip()
+                    amt = r["融資可能額"]
+                    note = "・".join(x for x in [
+                        str(r["日付"]) or "日付なし", str(r["相手"]),
+                        f"融資可能額 {amt:,.0f} 万円" if pd.notna(amt) else ""] if x)
+                    st.markdown(f"{_full(memo)}  \n:gray[（{_full(note)}）]")
+        return
+    cols = ["物件", "日付", "相手", "メモ結果"] + (["融資可能額"] if is_bank else [])
+    conf = {
+        "物件": st.column_config.TextColumn("物件", disabled=True, width=200),
+        "日付": st.column_config.TextColumn("日付", disabled=True, width=110),
+        "相手": st.column_config.TextColumn("相手", disabled=True, width=95),
+        "メモ結果": st.column_config.TextColumn("メモ・結果"),
+    }
+    if is_bank:
+        conf["融資可能額"] = money("融資可能額")
+    edited = st.data_editor(res[cols], width="stretch", hide_index=True,
+                            key=f"rs_ed_{office_id}", column_config=conf)
+    edit_cols = ["メモ結果"] + (["融資可能額"] if is_bank else [])
+    changed = _changed(edited[edit_cols], res[edit_cols])
+    n = int(changed.sum())
+    if st.button(f"物件ごとのメモ・結果を保存（{n} 件）", type="primary",
+                 disabled=(n == 0), key=f"rs_save_{office_id}"):
+        for i in edited.index[changed]:
+            amt = _num(edited.at[i, "融資可能額"]) if is_bank \
+                else _num(res.at[i, "融資可能額"])
+            execute("""
+                update re_interaction_properties
+                   set result = :r, loanable_amount = :amt
+                 where id = :id
+            """, {"id": str(res.at[i, "id"]), "r": _z(edited.at[i, "メモ結果"]),
+                  "amt": amt})
+        st.success(f"{n} 件を更新しました。")
+        st.rerun()
 
 
 def _persons_link_block(office_id: str, hist: pd.DataFrame) -> None:
