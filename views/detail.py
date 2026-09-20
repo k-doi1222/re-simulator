@@ -198,8 +198,9 @@ def render_summary():
     with c[2]:
         # ボタンの文字を長くすると、幅の狭い画面で1文字ずつ折り返す（実測565pxで8行）。
         # 隣に対象（指値後価格の入力欄）が見えているので、表示は「保存」でよい。
+        cur_ar = float(num(prop["negotiated_price"]) or purchase_price or 0)
         if st.button("保存", type="primary", width="stretch",
-                     help="指値後価格を保存します"):
+                     help="指値後価格を保存します", disabled=(ar == cur_ar)):
             execute("update re_properties set negotiated_price = :ar, updated_at = now() "
                     "where id = :id", {"ar": ar, "id": str(prop["id"])})
             st.toast("保存しました", icon=":material/check:")
@@ -380,12 +381,16 @@ def render_memo():
                     {"s": new_st, "id": str(prop["id"])})
             st.rerun()
 
-    with st.form(key=f"memo_{prop['id']}"):
-        c = st.columns(2)
-        m_memo = c[0].text_area("メモ・所感・疑問", txt(prop["memo"]), height=150)
-        m_broker = c[1].text_area("仲介業者コメント", txt(prop["broker_comment"]), height=150)
-        ok = st.form_submit_button("メモを保存", type="primary")
-    if ok:
+    # st.form は送信するまで入力値が分からず、変更の有無でボタンの色を変えられない。
+    # 全画面で振る舞いを揃えるため form は使わない。
+    c = st.columns(2)
+    m_memo = c[0].text_area("メモ・所感・疑問", txt(prop["memo"]), height=150,
+                            key=f"memo_m_{prop['id']}")
+    m_broker = c[1].text_area("仲介業者コメント", txt(prop["broker_comment"]), height=150,
+                              key=f"memo_b_{prop['id']}")
+    unchanged = (m_memo == txt(prop["memo"]) and m_broker == txt(prop["broker_comment"]))
+    if st.button("メモを保存", type="primary", key=f"memo_save_{prop['id']}",
+                 disabled=unchanged):
         execute("""
             update re_properties set memo = :memo, broker_comment = :broker, updated_at = now()
             where id = :id
@@ -963,7 +968,7 @@ def render_edit_form():
     # 入手経路の選択肢は re_inquiry_channels が持つ。増やすときはあの表に行を足す。
     channels = query("select name, description from re_inquiry_channels order by sort_order")
 
-    with st.expander("物件情報を直す"), st.form(key=f"edit_{prop['id']}"):
+    with st.expander("物件情報を直す", expanded=True), st.form(key=f"edit_{prop['id']}"):
         # B / C / D ＋ X / Y
         c = st.columns([2, 3, 3, 2, 2])
         # 元Excelの列名は「返信日付」だが、実態はこのDBに登録した日付なので画面上は「登録日付」

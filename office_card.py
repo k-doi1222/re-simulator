@@ -267,37 +267,43 @@ def _summary_memo(notes) -> None:
 
 def _office_info_block(company_kind: str, office_id: str, h: pd.Series) -> None:
     with st.expander("拠点の情報を直す"):
-        with st.form(f"oi_{office_id}", border=False):
-            c = st.columns([2, 2, 4])
-            f_branch = c[0].text_input("拠点名", h["拠点"] or "")
-            f_phone = c[1].text_input("電話", h["電話"] or "")
-            f_addr = c[2].text_input("所在地", h["所在地"] or "")
-            c = st.columns([2, 2, 2, 2])
-            f_region = c[0].text_input("地域", h["地域"] or "")
-            f_cat = c[1].text_input("区分", h["区分"] or "")
-            f_closed = c[2].text_input("定休日", h["定休日"] or "")
-            f_web = st.text_input("HP", h["HP"] or "", placeholder="https://")
-            # 「元Excel行 NN」は元データへ遡るための印。画面には出さず、DBには残す。
-            # 編集欄からも隠し、保存のときに元の行を付け直す（消えないように）。
-            keep = [ln for ln in str(h["メモ"] or "").splitlines()
-                    if _EXCEL_ROW.match(ln.strip())]
-            shown = "\n".join(ln for ln in str(h["メモ"] or "").splitlines()
-                               if not _EXCEL_ROW.match(ln.strip())).strip()
-            f_notes = st.text_area("まとめメモ", shown, height=150,
-                                   help="場所・人柄・作戦など、日付で変わりにくい情報")
-            if st.form_submit_button("拠点の情報を保存", type="primary"):
-                execute("""
-                    update re_offices
-                       set branch_name = :b, phone = :p, address = :a,
-                           region = :r, bank_category = :cat, closed_day = :cl,
-                           website = :w, notes = :n, updated_at = now()
-                     where id = cast(:oid as uuid)
-                """, {"oid": office_id, "b": _z(f_branch), "p": _z(f_phone),
-                      "a": _z(f_addr), "r": _z(f_region), "cat": _z(f_cat),
-                      "cl": _z(f_closed), "w": _z(f_web),
-                      "n": _z("\n".join(x for x in [f_notes.strip(), *keep] if x))})
-                st.toast("保存しました。", icon=":material/check:")
-                st.rerun()
+        # st.form は「送信するまで入力値が分からない」ので、変更の有無で
+        # 保存ボタンの色を変えられない。全画面で振る舞いを揃えるため form を使わない。
+        c = st.columns([2, 2, 4])
+        f_branch = c[0].text_input("拠点名", h["拠点"] or "")
+        f_phone = c[1].text_input("電話", h["電話"] or "")
+        f_addr = c[2].text_input("所在地", h["所在地"] or "")
+        c = st.columns([2, 2, 2, 2])
+        f_region = c[0].text_input("地域", h["地域"] or "")
+        f_cat = c[1].text_input("区分", h["区分"] or "")
+        f_closed = c[2].text_input("定休日", h["定休日"] or "")
+        f_web = st.text_input("HP", h["HP"] or "", placeholder="https://")
+        # 「元Excel行 NN」は元データへ遡るための印。画面には出さず、DBには残す。
+        # 編集欄からも隠し、保存のときに元の行を付け直す（消えないように）。
+        keep = [ln for ln in str(h["メモ"] or "").splitlines()
+                if _EXCEL_ROW.match(ln.strip())]
+        shown = "\n".join(ln for ln in str(h["メモ"] or "").splitlines()
+                           if not _EXCEL_ROW.match(ln.strip())).strip()
+        f_notes = st.text_area("まとめメモ", shown, height=150,
+                               help="場所・人柄・作戦など、日付で変わりにくい情報")
+        after = [_z(f_branch), _z(f_phone), _z(f_addr), _z(f_region), _z(f_cat),
+                 _z(f_closed), _z(f_web), _z(f_notes)]
+        before = [_z(h["拠点"]), _z(h["電話"]), _z(h["所在地"]), _z(h["地域"]),
+                  _z(h["区分"]), _z(h["定休日"]), _z(h["HP"]), _z(shown)]
+        if st.button("拠点の情報を保存", type="primary", key=f"oi_save_{office_id}",
+                     disabled=(after == before)):
+            execute("""
+                update re_offices
+                   set branch_name = :b, phone = :p, address = :a,
+                       region = :r, bank_category = :cat, closed_day = :cl,
+                       website = :w, notes = :n, updated_at = now()
+                 where id = cast(:oid as uuid)
+            """, {"oid": office_id, "b": _z(f_branch), "p": _z(f_phone),
+                  "a": _z(f_addr), "r": _z(f_region), "cat": _z(f_cat),
+                  "cl": _z(f_closed), "w": _z(f_web),
+                  "n": _z("\n".join(x for x in [f_notes.strip(), *keep] if x))})
+            st.toast("保存しました。", icon=":material/check:")
+            st.rerun()
 
     if company_kind == "bank":
         _loan_terms_block(office_id)
@@ -316,40 +322,44 @@ def _loan_terms_block(office_id: str) -> None:
         return "" if k not in r or pd.isna(r.get(k)) else str(r.get(k))
 
     with st.expander("融資条件を直す" + ("" if not t.empty else "（まだ未登録）")):
-        with st.form(f"lt_{office_id}", border=False):
-            c = st.columns([1, 1, 2, 2])
-            f_cand = c[0].text_input("候補", v("is_candidate"))
-            f_rate = c[1].text_input("総合評価", v("overall_rating"))
-            f_area = c[2].text_input("融資エリア", v("loan_area"))
-            f_term = c[3].text_input("融資期間", v("loan_term_note"))
-            c = st.columns([2, 2, 2, 2])
-            f_int = c[0].text_input("金利", v("interest_rate_note"))
-            f_lim = c[1].text_input("融資上限", v("loan_limit_note"))
-            f_full = c[2].text_input("フルローン", v("full_loan_note"))
-            f_corp = c[3].text_input("新設法人", v("new_corp_note"))
-            if st.form_submit_button("融資条件を保存", type="primary"):
-                execute("""
-                    insert into re_bank_loan_terms
-                      (office_id, is_candidate, overall_rating, loan_area,
-                       loan_term_note, interest_rate_note, loan_limit_note,
-                       full_loan_note, new_corp_note, updated_at)
-                    values (cast(:oid as uuid), :cand, :rate, :area, :term,
-                            :int, :lim, :full, :corp, now())
-                    on conflict (office_id) do update set
-                      is_candidate = excluded.is_candidate,
-                      overall_rating = excluded.overall_rating,
-                      loan_area = excluded.loan_area,
-                      loan_term_note = excluded.loan_term_note,
-                      interest_rate_note = excluded.interest_rate_note,
-                      loan_limit_note = excluded.loan_limit_note,
-                      full_loan_note = excluded.full_loan_note,
-                      new_corp_note = excluded.new_corp_note,
-                      updated_at = now()
-                """, {"oid": office_id, "cand": _z(f_cand), "rate": _z(f_rate),
-                      "area": _z(f_area), "term": _z(f_term), "int": _z(f_int),
-                      "lim": _z(f_lim), "full": _z(f_full), "corp": _z(f_corp)})
-                st.toast("保存しました。", icon=":material/check:")
-                st.rerun()
+        c = st.columns([1, 1, 2, 2])
+        f_cand = c[0].text_input("候補", v("is_candidate"))
+        f_rate = c[1].text_input("総合評価", v("overall_rating"))
+        f_area = c[2].text_input("融資エリア", v("loan_area"))
+        f_term = c[3].text_input("融資期間", v("loan_term_note"))
+        c = st.columns([2, 2, 2, 2])
+        f_int = c[0].text_input("金利", v("interest_rate_note"))
+        f_lim = c[1].text_input("融資上限", v("loan_limit_note"))
+        f_full = c[2].text_input("フルローン", v("full_loan_note"))
+        f_corp = c[3].text_input("新設法人", v("new_corp_note"))
+        keys = ["is_candidate", "overall_rating", "loan_area", "loan_term_note",
+                "interest_rate_note", "loan_limit_note", "full_loan_note",
+                "new_corp_note"]
+        after = [f_cand, f_rate, f_area, f_term, f_int, f_lim, f_full, f_corp]
+        if st.button("融資条件を保存", type="primary", key=f"lt_save_{office_id}",
+                     disabled=(after == [v(k) for k in keys])):
+            execute("""
+                insert into re_bank_loan_terms
+                  (office_id, is_candidate, overall_rating, loan_area,
+                   loan_term_note, interest_rate_note, loan_limit_note,
+                   full_loan_note, new_corp_note, updated_at)
+                values (cast(:oid as uuid), :cand, :rate, :area, :term,
+                        :int, :lim, :full, :corp, now())
+                on conflict (office_id) do update set
+                  is_candidate = excluded.is_candidate,
+                  overall_rating = excluded.overall_rating,
+                  loan_area = excluded.loan_area,
+                  loan_term_note = excluded.loan_term_note,
+                  interest_rate_note = excluded.interest_rate_note,
+                  loan_limit_note = excluded.loan_limit_note,
+                  full_loan_note = excluded.full_loan_note,
+                  new_corp_note = excluded.new_corp_note,
+                  updated_at = now()
+            """, {"oid": office_id, "cand": _z(f_cand), "rate": _z(f_rate),
+                  "area": _z(f_area), "term": _z(f_term), "int": _z(f_int),
+                  "lim": _z(f_lim), "full": _z(f_full), "corp": _z(f_corp)})
+            st.toast("保存しました。", icon=":material/check:")
+            st.rerun()
 
 
 # ── 担当者 ──────────────────────────────────────────────────
@@ -620,7 +630,12 @@ def edit_popover(label: str, *, iid, on=None, method=None, content=None,
             if is_bank:
                 f_amt = st.number_input("融資可能額（万円）", value=_num(amount),
                                         step=100.0, format="%.0f", key=f"{k}_a")
-        if st.button("保存", type="primary", key=f"{k}_s"):
+        same = (_d(f_on) == _d(on) and _z(f_m) == _z(method)
+                and _z(f_c) == _z(content)
+                and (ip_id is None
+                     or (_z(f_r) == _z(result)
+                         and (not is_bank or _num(f_amt) == _num(amount)))))
+        if st.button("保存", type="primary", key=f"{k}_s", disabled=same):
             execute("""
                 update re_interactions
                    set occurred_on = :on, method = :method, content = :content
@@ -860,7 +875,8 @@ def _persons_link_block(office_id: str, hist: pd.DataFrame) -> None:
         picked = st.multiselect("相手", names,
                                 default=[n for n in now if n in names],
                                 key=f"pl_sel_{office_id}_{iid}")
-        if st.button("相手を保存", type="primary", key=f"pl_save_{office_id}"):
+        if st.button("相手を保存", type="primary", key=f"pl_save_{office_id}",
+                     disabled=(sorted(picked) == sorted(n for n in now if n in names))):
             execute("delete from re_interaction_persons where interaction_id = cast(:iid as uuid)",
                     {"iid": iid})
             for nm in picked:
