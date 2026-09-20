@@ -1,13 +1,15 @@
-"""アプリの入口。認証してから、ページ遷移をStreamlitに任せる。"""
+"""アプリの入口。ページ遷移をStreamlitに任せる。
+
+閲覧制限はアプリの中ではなく Streamlit Community Cloud の Private 設定で行う
+（2026-09-20。それまではパスワードを1つ置いていた）。
+"""
 import streamlit as st
 
-from auth import require_password
 from db import query
 
 st.set_page_config(page_title="不動産投資シミュレーション",
                    page_icon="🏢", layout="wide")
 
-require_password()
 
 pg = st.navigation({
     "物件": [

@@ -15,13 +15,11 @@ import uuid
 import pandas as pd
 import streamlit as st
 
-from auth import require_password
 from db import execute, query, refresh_calc_cache
 from nav import goto_office_edit
 from office_card import METHODS, edit_popover, full_text, memo_block
 from theme import CALC_BG, compact_css, money, ratio
 
-require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
 # 一覧に出す計算値は re_property_calc_cache から読む。
 # 表示の前に、古くなったものだけ計算し直す（ふだんは0件で一瞬）。
 refresh_calc_cache()

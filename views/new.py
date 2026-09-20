@@ -7,11 +7,9 @@ import datetime
 
 import streamlit as st
 
-from auth import require_password
 from db import execute, query
 from theme import compact_css
 
-require_password()
 compact_css()
 
 st.markdown("### 物件を登録")

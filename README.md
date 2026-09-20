@@ -26,8 +26,7 @@ uv run streamlit run app.py
 
 | ファイル | 役割 |
 |---|---|
-| `app.py` | 入口。認証してページ遷移に渡す |
-| `auth.py` | パスワードによる入口の門 |
+| `app.py` | 入口。ページ遷移に渡す |
 | `db.py` | データベース接続。SELECTは5分キャッシュ |
 | `theme.py` | 入力値と計算値を見分けるための色 |
 | `views/list.py` | 物件一覧 |
@@ -35,6 +34,9 @@ uv run streamlit run app.py
 
 ## 注意
 
+- **閲覧制限はアプリの中ではなく Streamlit Community Cloud の Private 設定で行う**（2026-09-20）。
+  アプリ側のパスワードは廃止した。Private にすると、リポジトリへの push 権限を持つ人は
+  GitHub ログインで素通りでき、それ以外は viewer に招待したメールの Google 認証で入る
 - `.streamlit/secrets.toml` は接続情報を含むため Git に載せない（`.gitignore` 済み）
 - データベースへは **Session pooler** で接続する。Direct connection は IPv6 専用のため
   IPv6非対応の回線からは繋がらない

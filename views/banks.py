@@ -9,7 +9,6 @@
 """
 import streamlit as st
 
-from auth import require_password
 from db import query, refresh_calc_cache
 from nav import clear_selection, goto_property, render_back_to_property
 from office_card import (render_office_card, render_office_picker,
@@ -17,7 +16,6 @@ from office_card import (render_office_card, render_office_picker,
 from partners import render_persons
 from theme import compact_css, count, longtext, money
 
-require_password()
 # 一覧に出す計算値は re_property_calc_cache から読む。
 # 表示の前に、古くなったものだけ計算し直す（ふだんは0件で一瞬）。
 refresh_calc_cache()
