@@ -18,7 +18,7 @@ import streamlit as st
 from auth import require_password
 from db import execute, query, refresh_calc_cache
 from nav import goto_office_edit
-from office_card import METHODS, edit_popover, entry_sep, full_text
+from office_card import METHODS, edit_popover, full_text
 from theme import CALC_BG, compact_css, money, ratio
 
 require_password()  # サイドバー経由の直接遷移で認証をすり抜けないよう、各ページ自身でも確認する
@@ -496,9 +496,7 @@ def _content_blocks(part: pd.DataFrame) -> None:
         title = "　".join(x for x in place + [str(name)] if x and x != "nan")
         with st.container(border=True):
             st.markdown(f"**{full_text(title)}**")
-            for n, (_, r) in enumerate(g.iterrows()):
-                if n:
-                    entry_sep()
+            for _, r in g.iterrows():
                 shared = str(r.get("内容共通", "") or "").strip()
                 per_prop = str(r.get("物件結果", "") or "").strip()
                 ip_id = str(r.get("ip_id") or "")

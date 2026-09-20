@@ -503,17 +503,6 @@ def _full(text) -> str:
 full_text = _full   # 物件詳細からも同じ整形を使う（改行そのまま・Markdown解釈なし）
 
 
-def entry_sep() -> None:
-    """枠の中で、記録と記録の間に引く細い線。
-
-    区切りが灰色の日付行だけだと、長い記録（人物プロフィールなど）のあとで
-    どこから次の記録か分からなくなる。st.divider() は太く余白も大きいので、
-    枠の中では薄い線にする。
-    """
-    st.html('<hr style="margin:.35rem 0 .5rem;border:none;'
-            'border-top:1px solid rgba(128,128,128,.25)">')
-
-
 def _full_cards(hist: pd.DataFrame, memos: dict | None = None) -> None:
     """やりとりを担当者ごとに1枠にまとめ、全文で読める形で並べる。
 
@@ -542,9 +531,7 @@ def _full_cards(hist: pd.DataFrame, memos: dict | None = None) -> None:
                 st.markdown(_full("\n".join(notes)))
                 st.divider()
                 st.caption("やりとり")
-            for n, (_, r) in enumerate(g.iterrows()):
-                if n:
-                    entry_sep()
+            for _, r in g.iterrows():
                 note = "・".join(x for x in [str(r["日付"]) or "日付なし", str(r["手段"])] if x)
                 st.markdown(_full(r["内容"]))
                 edit_popover(f"（{note}）", iid=r["id"], on=r["日付"], method=r["手段"],
@@ -752,9 +739,7 @@ def _results_block(office_id: str, ikind: str) -> None:
     for prop, g in live.groupby(live["物件"].replace("", "物件の記録なし"), sort=False):
         with st.container(border=True):
             st.markdown(f"**{_full(prop)}**")
-            for n, (_, r) in enumerate(g.iterrows()):
-                if n:
-                    entry_sep()
+            for _, r in g.iterrows():
                 amt = r["融資可能額"]
                 note = "・".join(x for x in [
                     str(r["日付"]) or "日付なし", str(r["相手"]),
