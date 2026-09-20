@@ -440,10 +440,14 @@ def _full_cards(hist: pd.DataFrame, memos: dict | None = None) -> None:
     for who, g in hist.groupby(hist["相手"].replace("", "相手の記録なし"), sort=False):
         with st.container(border=True):
             st.markdown(f"**{_full(who)}**")
-            for nm in str(who).split(" / "):
-                if memos.get(nm):
-                    head = f"{nm}：" if " / " in str(who) else ""
-                    st.caption(f"まとめメモ　{_full(head + memos[nm])}")
+            # 枠の上段は「今どうなっているか」（担当者のまとめメモ）。
+            # 下段は「いつ誰から聞いたか」。区切り線で2つの役割を分ける。
+            # 灰色の小さい字にすると読み飛ばされるので、本文と同じ大きさで出す。
+            notes = [f"{nm}：{memos[nm]}" if " / " in str(who) else memos[nm]
+                     for nm in str(who).split(" / ") if memos.get(nm)]
+            if notes:
+                st.markdown(_full("\n".join(notes)))
+                st.divider()
             for _, r in g.iterrows():
                 note = "・".join(x for x in [str(r["日付"]) or "日付なし", str(r["手段"])] if x)
                 st.markdown(f"{_full(r['内容'])}  \n:gray[（{_full(note)}）]")
