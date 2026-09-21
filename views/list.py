@@ -27,7 +27,7 @@ STATUS_LIST = statuses["status"].tolist()
 COLOR_OF = dict(zip(statuses["status"], statuses["row_color"]))
 
 # 決着がついた物件は既定では出さない。見たいときは「状況で絞る」に足す。
-CLOSED = ("終了", "一旦断念")
+CLOSED = ("終了", "一旦断念", "値下がり待ち")
 DEFAULT_STATUS = [s for s in STATUS_LIST if s not in CLOSED]
 
 # ── 絞り込み ────────────────────────────────────────────────
@@ -38,7 +38,7 @@ with c1:
                             help="同じ物件の別バージョンを畳んで、1物件1行で表示します")
 with c2:
     f_status = st.multiselect("状況で絞る", STATUS_LIST, default=DEFAULT_STATUS,
-                              help="はじめは「終了」「一旦断念」を外してあります。"
+                              help="はじめは「終了」「一旦断念」「値下がり待ち」を外してあります。"
                                    "空にすると全部表示します")
 with c3:
     marks = st.multiselect("CF基準で絞る", ["◎", "○", "△", "×", "判定なし"], default=[])
