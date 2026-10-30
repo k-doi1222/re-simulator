@@ -38,6 +38,8 @@ RAW_COLS = """
     p.has_elevator, p.has_septic_tank, p.free_internet, p.hazard,
     p.legal_useful_life, p.bank_offered_rate, p.scenario_label,
     coalesce(p.legal_useful_life, re_useful_life_by_structure(p.structure)) as useful_life,
+    -- 金利は銀行提示金利を優先し、空なら標準（re_standard_interest_rate）。一覧のキャッシュと同じ決め方
+    coalesce(p.bank_offered_rate::float8, re_standard_interest_rate()) as interest_rate,
     -- 目標判定に乗せる価格は100万円刻み。丸めた分だけ目標を上回るので、
     -- 減額幅ではなく「その価格でのCF基準」を見せる。
     t150.price as t150_price, t150.discount_rate as t150_rate,
@@ -58,13 +60,13 @@ TARGET_JOIN = """
 # 計算関数に渡す入力値。どちらのSQLでも同じ列名で使う。
 INPUT_COLS = ["purchase_price", "land_area", "road_price_actual", "zone_coef", "shape_coef",
              "floor_area", "built_date", "full_income", "current_income", "extra_cost",
-             "property_tax", "useful_life"]
+             "property_tax", "useful_life", "interest_rate"]
 
 LIVE_SQL = """
     select * from re_calc_property_analysis(
       :purchase_price, :ar, :land_area, :road_price_actual, :zone_coef, :shape_coef,
       :floor_area, :built_date, :full_income, :current_income, :extra_cost, :property_tax,
-      :useful_life, 0.015, 0.09, 0.2, 0.04, 19, current_date, 1, null
+      :useful_life, :interest_rate, 0.09, 0.2, 0.04, 19, current_date, 1, null
     )
 """
 
@@ -303,12 +305,16 @@ def render_calc_detail(ar, row):
     tax_note = ("固都税（実額）" if tax_actual is not None
                 else "固都税（実額が未入力のため建物評価から仮計算）")
 
+    pct = f"{prop['interest_rate'] * 100:.3f}".rstrip("0")   # 2.000→2.0、1.875→1.875
+    pct += "0" if pct.endswith(".") else ""
+    rate_label = (f"金利{pct}%"
+                  + ("（銀行提示）" if num(prop["bank_offered_rate"]) is not None else "（標準）"))
     common = (
         f"\n\n**共通で差し引くもの**\n"
         f"- 管理費 {yen(row['c_ca'])}"
         f"（満室年収 × 管理費率 {row['c_dg']:.1f}%。管理費率は 9 ＋ 築年数 ÷ 3）\n"
         f"- 年間返済額 {yen(row['c_cd'])}"
-        f"（指値後価格の全額を金利1.5%・{row['c_by']:.0f}年で元利均等返済）\n"
+        f"（指値後価格の全額を{rate_label}・{row['c_by']:.0f}年で元利均等返済）\n"
         f"- EV費等の追加 {yen(bh) if bh is not None else '0 万円'}\n"
         f"- {tax_note} {yen(tax_used)}")
 
@@ -327,7 +333,7 @@ def render_calc_detail(ar, row):
                 "今の入居状況のままだった場合のCF。下振れの目安です。\n\n"
                 f"現況年収 {yen(be)} から差し引いて **{yen(row['c_bv'])}**" + common))
             m[3].metric("年間返済額", yen(row["c_cd"]), help=(
-                f"指値後価格の全額を借りる前提。金利1.5%・融資年数 {row['c_by']:.0f}年"
+                f"指値後価格の全額を借りる前提。{rate_label}・融資年数 {row['c_by']:.0f}年"
                 "（法定耐用年数 − 築年数、上限30年）の元利均等返済です。"))
 
         with st.container(key="detail_calc"):
@@ -1086,7 +1092,7 @@ def render_edit_form():
                                     help="CATV・インターネット・浄化槽の維持費などの年額")
         f_rate = c[3].number_input("銀行提示金利", value=num(prop["bank_offered_rate"]),
                                    step=0.001, format="%.3f",
-                                   help="例：0.02（2.0%）。空欄なら標準の1.5%で計算")
+                                   help="例：0.025（2.5%）。空欄なら標準の2.0%で計算")
         f_life = c[4].number_input("耐用年数の上書き(年)", value=num(prop["legal_useful_life"]),
                                    step=1.0, format="%.0f",
                                    help=f"通常は空欄。空欄なら構造から自動で {prop['useful_life']:.0f} 年")

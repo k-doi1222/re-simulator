@@ -42,7 +42,7 @@ with st.form("new_property"):
     nego = c[3].number_input("指値後価格(万円)", value=None, step=10.0, format="%.0f",
                              help="空欄なら販売価格をそのまま使います")
     rate = c[4].number_input("銀行提示金利", value=None, step=0.001, format="%.3f",
-                             help="空欄なら標準の1.5%で計算")
+                             help="空欄なら標準の2.0%で計算")
 
     c = st.columns(6)
     land = c[0].number_input("土地面積(㎡)", value=None, step=1.0, format="%.0f")
