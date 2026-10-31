@@ -41,8 +41,9 @@ with st.form("new_property"):
     price = c[2].number_input("販売価格(万円)", value=None, step=10.0, format="%.0f")
     nego = c[3].number_input("指値後価格(万円)", value=None, step=10.0, format="%.0f",
                              help="空欄なら販売価格をそのまま使います")
-    rate = c[4].number_input("銀行提示金利", value=None, step=0.001, format="%.3f",
-                             help="空欄なら標準の2.0%で計算")
+    rate_pct = c[4].number_input("銀行提示金利(%)", value=None,
+                                 min_value=0.001, max_value=20.0, step=0.1, format="%.3f",
+                                 help="例：2.5（2.5%）。空欄なら標準の2.0%で計算")
 
     c = st.columns(6)
     land = c[0].number_input("土地面積(㎡)", value=None, step=1.0, format="%.0f")
@@ -118,7 +119,9 @@ if submitted:
             "full_income": full_income, "curr_income": curr_income,
             "occ": occ, "total": total, "tax": tax, "extra": extra,
             "park": park, "expark": z(expark), "ev": z(ev), "septic": z(septic),
-            "net": z(net), "hazard": z(hazard), "rate": rate,
+            "net": z(net), "hazard": z(hazard),
+            # 金利も画面では%で入力してもらい、保存時に100で割る（DBは 0.02＝2%）
+            "rate": None if rate_pct is None else rate_pct / 100,
             "memo": z(memo), "broker_comment": z(broker_comment), "office_id": office_id,
         })
         query.clear()

@@ -1090,12 +1090,33 @@ def render_edit_form():
         f_extra = c[2].number_input("EV費等の追加(万円)", value=num(prop["extra_cost"]),
                                     step=1.0, format="%.0f",
                                     help="CATV・インターネット・浄化槽の維持費などの年額")
-        f_rate = c[3].number_input("銀行提示金利", value=num(prop["bank_offered_rate"]),
-                                   step=0.001, format="%.3f",
-                                   help="例：0.025（2.5%）。空欄なら標準の2.0%で計算")
-        f_life = c[4].number_input("耐用年数の上書き(年)", value=num(prop["legal_useful_life"]),
-                                   step=1.0, format="%.0f",
-                                   help=f"通常は空欄。空欄なら構造から自動で {prop['useful_life']:.0f} 年")
+
+        def clearable_number(col, label, cur, name, **kw):
+            """空欄に意味がある欄。値が入っていても消せるようにする。
+
+            value= に数値を渡すと消せない欄になるので、欄は value=None で作り、
+            今の値は session_state から入れる。DBの値が変わったときだけ入れ直す
+            （毎回入れると入力中の値が戻ってしまう）。キーは物件ごとに分ける。
+            """
+            key = f"{name}_{prop['id']}"
+            if key not in st.session_state or st.session_state.get(f"{key}_src") != cur:
+                st.session_state[key] = cur
+                st.session_state[f"{key}_src"] = cur
+            return col.number_input(label, value=None, key=key, **kw)
+
+        # 金利は画面では%で入力してもらい、保存時に100で割って戻す（DBは 0.02＝2%）。
+        # 0は空欄（標準）と紛らわしく、20%超は単位の間違いなので入れられなくする
+        cur_rate = num(prop["bank_offered_rate"])
+        f_rate_pct = clearable_number(
+            c[3], "銀行提示金利(%)",
+            None if cur_rate is None else round(cur_rate * 100, 6), "edit_rate",
+            min_value=0.001, max_value=20.0, step=0.1, format="%.3f",
+            help="例：2.5（2.5%）。空欄なら標準の2.0%で計算")
+        f_rate = None if f_rate_pct is None else f_rate_pct / 100
+        f_life = clearable_number(
+            c[4], "耐用年数の上書き(年)", num(prop["legal_useful_life"]), "edit_life",
+            step=1.0, format="%.0f",
+            help=f"通常は空欄。空欄なら構造から自動で {prop['useful_life']:.0f} 年")
 
         after = {
             "reply_date": f_reply, "address": blank_to_none(f_addr),
@@ -1122,7 +1143,7 @@ def render_edit_form():
         def same(k, v):
             """DBの今の値と、入力された値を比べる。型と丸めのゆれを吸収する。"""
             cur = prop[k] if k in prop else None
-            if k in ("zone_coef", "shape_coef"):
+            if k in ("zone_coef", "shape_coef", "bank_offered_rate"):
                 # 画面は%（100倍）で入力する。往復で出る微小な誤差は同じ扱いにする
                 a, b = num(cur), v
                 return (a is None and b is None) or (
