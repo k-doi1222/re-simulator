@@ -575,38 +575,66 @@ def memo_block(text: str) -> None:
 
 
 
+def _bank_flow(hist: pd.DataFrame, ppl: pd.DataFrame) -> None:
+    """銀行のやりとり。上段に担当者全員、下段にやりとりを新しい順で1つの流れにする。
+
+    銀行は現任がほぼ1人で、どの物件を持ち込んでも同じ相手と話す。担当が替わるのは異動で、
+    引き継ぎの面談は前任と後任の2人になる（複数人のやりとりは銀行に8件、売買1件、賃貸0件）。
+    人の組み合わせで枠を分けると「A / B」という実在しない2人組ができるので、枠を分けない。
+    誰と話したかは日付の行に出す。物件ごとのメモは下の「物件ごと」に出る。
+    """
+    # 話が空の回は出さない。物件メモや表の方で見られる。
+    hist = hist[hist["内容"].astype(str).str.strip() != ""]
+    with st.container(border=True):
+        for _, pe in ppl.iterrows():
+            state = "現任" if pd.isna(pe["現任"]) or pe["現任"] else "異動済"
+            st.markdown(f"{_full(pe['氏名'])}　:gray[（{state}）]")
+            memo_block("" if pd.isna(pe["まとめメモ"]) else str(pe["まとめメモ"]))
+        if not ppl.empty:
+            st.divider()
+        st.caption("やりとり")
+        for _, r in hist.iterrows():
+            note = "・".join(x for x in [str(r["日付"]) or "日付なし", str(r["手段"]),
+                                        str(r["相手"]).replace(" / ", "、"),
+                                        str(r["物件"]).replace(" / ", "、")] if x)
+            st.markdown(_full(r["内容"]))
+            edit_popover(f"（{note}）", iid=r["id"], on=r["日付"], method=r["手段"],
+                         content=r["内容"])
+
+
 def _full_cards(hist: pd.DataFrame, memos: dict | None = None) -> None:
-    """やりとりを担当者ごとに1枠にまとめ、全文で読める形で並べる。
+    """やりとりを担当者ごとに1枠にまとめ、全文で読める形で並べる（売買仲介・賃貸仲介）。
 
     人の情報は日付で区切るより続けて読みたいので、日付・手段は各話の末尾に小さく添える。
     DB は1回ずつの記録のまま（いつ聞いた話かを残すため）。表示だけまとめている。
     人についての話（re_interactions.content）だけを出す。物件ごとのメモは
     下の「物件ごとのメモ・結果」に出る。
-    複数人のやりとりは「A / B」の組で1枠にする（同じ話を各人に重複させない）。
+    複数人のやりとりは最初の人の枠に入れ、全員の名前を日付の行に出す
+    （「A / B」の組で枠を作ると、実在しない2人組が見出しになる）。
     memos は 氏名 → 担当者のまとめメモ（re_persons.memo）。名前のすぐ下に出す。
     """
     memos = memos or {}
     # 話が空の回は出さない（名前だけの枠も作らない）。物件メモや表の方で見られる。
     hist = hist[hist["内容"].astype(str).str.strip() != ""]
     shown = set()
+    first = hist["相手"].astype(str).str.split(" / ").str[0].replace("", "相手の記録なし")
     # hist は新しい順。枠の並びも「最近話した相手」順になる。
-    for who, g in hist.groupby(hist["相手"].replace("", "相手の記録なし"), sort=False):
-        shown.update(str(who).split(" / "))
+    for who, g in hist.groupby(first, sort=False):
+        shown.add(who)
         with st.container(border=True):
             st.markdown(f"**{_full(who)}**")
             # 枠の上段は「今どうなっているか」（担当者のまとめメモ）。
             # 下段は「いつ誰から聞いたか」。区切り線で2つの役割を分ける。
             # 灰色の小さい字にすると読み飛ばされるので、本文と同じ大きさで出す。
-            notes = [f"{nm}：{memos[nm]}" if " / " in str(who) else memos[nm]
-                     for nm in str(who).split(" / ") if memos.get(nm)]
             # 名札はまとめメモがあるときだけ。未記入の行を毎回出すとうるさい。
-            if notes:
+            if memos.get(who):
                 st.caption("この人について")
-                memo_block("\n".join(notes))
+                memo_block(memos[who])
                 st.divider()
                 st.caption("やりとり")
             for _, r in g.iterrows():
-                note = "・".join(x for x in [str(r["日付"]) or "日付なし", str(r["手段"])] if x)
+                others = str(r["相手"]).replace(" / ", "、") if " / " in str(r["相手"]) else ""
+                note = "・".join(x for x in [str(r["日付"]) or "日付なし", str(r["手段"]), others] if x)
                 st.markdown(_full(r["内容"]))
                 edit_popover(f"（{note}）", iid=r["id"], on=r["日付"], method=r["手段"],
                              content=r["内容"])
@@ -715,12 +743,15 @@ def _interactions_block(company_kind: str, office_id: str) -> None:
     hist = _blank(hist, ["手段", "内容", "相手", "物件"])
 
     # 読む形を既定にする（直すのは各記録の日付の行から。トグルでの切り替えはやめた）。
-    st.markdown("###### 担当者ごと")
+    st.markdown("###### 担当者とやりとり" if company_kind == "bank" else "###### 担当者ごと")
     if hist["内容"].astype(str).str.strip().eq("").all():
         st.caption("本文のある記録はまだありません。")
     ppl = persons_of(office_id)
-    _full_cards(hist, {r["氏名"]: r["まとめメモ"] for _, r in ppl.iterrows()
-                       if isinstance(r["まとめメモ"], str) and r["まとめメモ"].strip()})
+    if company_kind == "bank":
+        _bank_flow(hist, ppl)
+    else:
+        _full_cards(hist, {r["氏名"]: r["まとめメモ"] for _, r in ppl.iterrows()
+                           if isinstance(r["まとめメモ"], str) and r["まとめメモ"].strip()})
 
     _results_block(office_id, ikind)
     _persons_link_block(office_id, hist)

@@ -487,51 +487,63 @@ def _office_kind(kinds) -> str:
 
 
 def _content_blocks(part: pd.DataFrame) -> None:
-    """やりとりの本文を、**相手（担当者）ごとに1枠**で出す。直すのは日付の行から。
+    """やりとりの本文を、**相手の拠点（支店）ごとに1枠**で出す。直すのは日付の行から。
 
-    拠点カルテと同じ考え方で「その画面で固定されていない軸」で束ねる。
-    拠点カルテは拠点が固定なので人と物件で束ね、ここは物件が固定なので人で束ねる。
-    1件ずつ枠に分けていたときは、同じ相手の名前が枠の数だけ反復し、
-    同じ人の話が分断されていた（売買仲介は1人の話が4枠に分かれていた）。
-    枠の先頭に相手の名前を出すのは、長い記録だと読み始めても誰の話か分からないため。
+    上段が担当者（人ごとのメモ）、下段がやりとり（誰と話したかは日付の注記に出す）。
+    「人の組み合わせ」で枠を分けていたときは、「近藤さん / 村木 俊太」のように
+    実在しない2人組が見出しになり、同じ人のメモが枠の数だけ反復し、
+    同じ支店の話が分断されていた（2026-10-31 に変更）。
     """
     part = part[part["interaction_id"].notna()]
     if part.empty:
         return
     # 担当者のまとめメモ（第2層）は拠点カルテにしか無かったので、この画面にも出す。
     # 人についての話を第2層へ移すと、物件詳細から見えなくなってしまうため。
-    memos = query("""
-        select name, memo from re_persons
-         where memo is not null and btrim(memo) <> ''
-    """).set_index("name")["memo"].to_dict()
+    persons = query("""
+        select office_id::text as office_id, name, memo,
+               coalesce(is_current, true) as is_current
+        from re_persons
+    """)
     # 日付なしはその人についての恒常的な話であることが多いので、枠の先頭に置く
     part = part.assign(_nodate=part["日付"].astype(str).str.strip().eq(""))
     part = part.sort_values("_nodate", ascending=False, kind="stable")
     is_bank = (part["kind"] == "bank_inquiry").any()
-    who = (part["担当者"].astype(str).str.strip()
-           .replace("", "相手の記録なし"))
-    for name, g in part.groupby(who, sort=False):
+    for office_id, g in part.groupby(part["office_id"].astype(str), sort=False):
         r0 = g.iloc[0]
         # 銀行は会社名（銀行名）まで要る。仲介は拠点名に会社名が入っていることが多い
         place = [str(r0.get("会社", "") or "")] if is_bank else []
         place += [str(r0.get("拠点", "") or "")]
-        title = "　".join(x for x in place + [str(name)] if x and x != "nan")
+        # 支店名のない会社は拠点名が空なので、会社名で見出しを作る
+        title = ("　".join(x for x in place if x and x != "nan")
+                 or str(r0.get("会社", "") or "") or "相手の記録なし")
+        # 出すのは「この物件のやりとりに出てくる人」だけ。拠点の現任を全員足すと、
+        # 話したことのない人まで並ぶ（売買仲介で実際に起きた）。
+        # 相手の記録がない銀行打診は、担当者の列が現任で代えた値なので現任が出る
+        names = [nm for v in g["担当者"] for nm in str(v).split(" / ") if nm.strip()]
+        here = persons[(persons["office_id"] == office_id) & persons["name"].isin(names)]
         with st.container(border=True):
             st.markdown(f"**{full_text(title)}**")
-            notes = [f"{nm}：{memos[nm]}" if " / " in str(name) else memos[nm]
-                     for nm in str(name).split(" / ") if memos.get(nm)]
-            if notes:
-                # 拠点カルテと同じ形：上段が「今どうなっているか」、下は日付つきの記録
-                st.caption("この人について")
-                memo_block("\n".join(notes))
+            shown = []
+            for _, pe in here.sort_values("is_current", ascending=False, kind="stable").iterrows():
+                state = "現任" if pe["is_current"] else "異動済"
+                st.markdown(f"{full_text(pe['name'])}　:gray[（{state}）]")
+                memo_block("" if pd.isna(pe["memo"]) else str(pe["memo"]))
+                shown.append(pe["name"])
+            # 名寄せできなかった相手や別拠点の人は、名前だけでも残す
+            for nm in dict.fromkeys(n for n in names if n not in shown):
+                st.markdown(full_text(nm))
+            if shown or names:
                 st.divider()
-                st.caption("やりとり")
+            st.caption("やりとり")
             for _, r in g.iterrows():
                 shared = str(r.get("内容共通", "") or "").strip()
                 per_prop = str(r.get("物件結果", "") or "").strip()
                 ip_id = str(r.get("ip_id") or "")
+                # 相手の記録がないやりとりの「担当者」は現任で代えた値なので、注記には出さない
+                who = str(r.get("担当者", "") or "") if r.get("相手記録") else ""
                 note = "・".join(x for x in [str(r.get("日付", "") or "") or "日付なし",
-                                            str(r.get("手段", "") or "")] if x)
+                                            str(r.get("手段", "") or ""),
+                                            who.replace(" / ", "、")] if x)
                 if shared:
                     st.markdown(full_text(shared))
                 if per_prop:
@@ -896,6 +908,8 @@ def render_interactions():
                    where pe.office_id = i.office_id
                      and coalesce(pe.is_current, true))
                ) as 担当者,
+               exists (select 1 from re_interaction_persons ipe
+                        where ipe.interaction_id = i.id) as 相手記録,
                ip.loanable_amount as 融資可能額,
                ip.id as ip_id,
                i.content as 内容共通, ip.result as 物件結果,
