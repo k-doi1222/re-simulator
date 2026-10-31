@@ -500,7 +500,7 @@ def _content_blocks(part: pd.DataFrame) -> None:
     # 担当者のまとめメモ（第2層）は拠点カルテにしか無かったので、この画面にも出す。
     # 人についての話を第2層へ移すと、物件詳細から見えなくなってしまうため。
     persons = query("""
-        select office_id::text as office_id, name, memo,
+        select id::text as id, office_id::text as office_id, name, memo,
                coalesce(is_current, true) as is_current
         from re_persons
     """)
@@ -534,7 +534,10 @@ def _content_blocks(part: pd.DataFrame) -> None:
                 st.markdown(full_text(nm))
             if shown or names:
                 st.divider()
-            st.caption("やりとり")
+            c = st.columns([5, 1.6], vertical_alignment="center")
+            c[0].caption("やりとり")
+            with c[1]:
+                _quick_add(office_id, str(r0["kind"]), g, persons)
             for _, r in g.iterrows():
                 shared = str(r.get("内容共通", "") or "").strip()
                 per_prop = str(r.get("物件結果", "") or "").strip()
@@ -699,6 +702,82 @@ def add_interaction_dialog():
     render_add_interaction()
 
 
+def _insert_interaction(office_id, kind_db, on, method, content, person_ids, amount) -> None:
+    """やりとり1件を、相手と物件につないで記録する。"""
+    pid = str(prop["id"])
+    iid = str(uuid.uuid4())
+    execute("""
+        insert into re_interactions (id, office_id, kind, occurred_on, method, content)
+        values (cast(:id as uuid), cast(:oid as uuid), :k, :on, :method, :content)
+    """, {"id": iid, "oid": office_id, "k": kind_db, "on": on,
+          "method": method, "content": content.strip()})
+    for person_id in person_ids:
+        execute("""
+            insert into re_interaction_persons (id, interaction_id, person_id)
+            values (cast(:id as uuid), cast(:iid as uuid), cast(:pid as uuid))
+        """, {"id": str(uuid.uuid4()), "iid": iid, "pid": person_id})
+
+    # result（物件ごとの結果）は入れない。上の履歴は coalesce(result, content) で
+    # content に落ちるので空でも表示される。移行データのように content の写しを
+    # 作ると、あとで内容を直したときに写しの側だけ古いまま残る。
+    execute("""
+        insert into re_interaction_properties
+          (id, interaction_id, property_id, property_name_raw, loanable_amount)
+        values (cast(:id as uuid), cast(:iid as uuid), cast(:pid as uuid), :raw, :amt)
+    """, {"id": str(uuid.uuid4()), "iid": iid, "pid": pid,
+          "raw": blank_to_none(txt(prop["name"])), "amt": amount})
+
+    # 基本形は「紹介元＝やりとり先」。紹介元がまだ空なら、いま記録した相手を
+    # そのまま紹介元にする。ここを自動にしないと、同じ業者を2か所へ手で入れる
+    # ことになり、実際に食い違いが起きていた。
+    # 既に紹介元が入っているときは触らない（問い合わせ先が増えただけかもしれない）。
+    if kind_db == "sales_contact" and not txt(prop["source_office_id"]):
+        set_source(pid, office_id, person_ids[0] if person_ids else None)
+
+
+def _quick_add(office_id: str, kind_db: str, part: pd.DataFrame, persons: pd.DataFrame) -> None:
+    """この相手とのやりとりを1件足す小窓。物件と拠点は決まっているので選ばせない。
+
+    ほとんどの記録は「同じ相手との続き」なのに、右上の「＋ やりとりを記録」は
+    会社・拠点から選び直すので手間が大きかった。新しい相手のときだけ右上を使う。
+    担当者の初期値は、直近のやりとりの相手のうち現任の人。異動で誰も残らないときは、
+    現任が1人ならその人にする。
+    """
+    pid = str(prop["id"])
+    here = persons[(persons["office_id"] == office_id) & persons["name"].notna()]
+    current = here[here["is_current"]]["name"].tolist()
+    linked = part[part["相手記録"].astype(bool)]
+    last = (str(linked.iloc[0]["担当者"]).split(" / ") if not linked.empty else [])
+    default = [n for n in last if n in current]
+    if not default and len(current) == 1:
+        default = current
+    seq = st.session_state.get(f"qseq_{pid}_{office_id}_{kind_db}", 0)
+    k = lambda name: f"q{name}_{pid}_{office_id}_{kind_db}_{seq}"  # noqa: E731
+
+    with st.popover("＋ 続きを記録", width="stretch"):
+        with st.form(k("form"), border=False):
+            c = st.columns(2)
+            a_on = c[0].date_input("日付", value=datetime.date.today(), key=k("on"))
+            a_method = c[1].selectbox("手段", METHODS, index=None, key=k("method"),
+                                      placeholder="選ぶ（任意）")
+            a_who = st.multiselect("担当者", current, default=default, key=k("who"))
+            a_amt = (st.number_input("融資可能額（万円）", value=None, step=100.0,
+                                     format="%.0f", key=k("amt"))
+                     if kind_db == "bank_inquiry" else None)
+            a_content = st.text_area("内容 *", height=110, key=k("con"))
+            ok = st.form_submit_button("記録する", type="primary")
+        if not ok:
+            return
+        if not a_content.strip():
+            st.error("内容 を入力してください。")
+            return
+        person_ids = [str(here.loc[here["name"] == n, "id"].iloc[0]) for n in a_who]
+        _insert_interaction(office_id, kind_db, a_on, a_method, a_content, person_ids, a_amt)
+        st.session_state[f"qseq_{pid}_{office_id}_{kind_db}"] = seq + 1
+        st.toast("記録しました。", icon=":material/check:")
+        st.rerun()
+
+
 def render_add_interaction():
     """この画面から、やりとり・打診を手で足す。
 
@@ -827,13 +906,6 @@ def render_add_interaction():
             values (cast(:id as uuid), cast(:cid as uuid), :b)
         """, {"id": office_id, "cid": comp_id, "b": blank_to_none(f_branch)})
 
-    iid = str(uuid.uuid4())
-    execute("""
-        insert into re_interactions (id, office_id, kind, occurred_on, method, content)
-        values (cast(:id as uuid), cast(:oid as uuid), :k, :on, :method, :content)
-    """, {"id": iid, "oid": office_id, "k": kind_db, "on": a_on,
-          "method": a_method, "content": a_content.strip()})
-
     # 選んだ担当者 ＋ 新しく入れた担当者。新しい人は re_persons に作る。
     # person_name_raw に文字列で置くこともできるが、それだと取引先カルテの
     # 担当者一覧に出てこず、次に選ぶこともできない。
@@ -857,28 +929,7 @@ def render_add_interaction():
         """, {"id": new_pid, "oid": office_id, "n": nm})
         person_ids.append(new_pid)
     person_ids = list(dict.fromkeys(person_ids))   # 選択と入力で重複したら1つに
-    for person_id in person_ids:
-        execute("""
-            insert into re_interaction_persons (id, interaction_id, person_id)
-            values (cast(:id as uuid), cast(:iid as uuid), cast(:pid as uuid))
-        """, {"id": str(uuid.uuid4()), "iid": iid, "pid": person_id})
-
-    # result（物件ごとの結果）は入れない。上の履歴は coalesce(result, content) で
-    # content に落ちるので空でも表示される。移行データのように content の写しを
-    # 作ると、あとで内容を直したときに写しの側だけ古いまま残る。
-    execute("""
-        insert into re_interaction_properties
-          (id, interaction_id, property_id, property_name_raw, loanable_amount)
-        values (cast(:id as uuid), cast(:iid as uuid), cast(:pid as uuid), :raw, :amt)
-    """, {"id": str(uuid.uuid4()), "iid": iid, "pid": pid,
-          "raw": blank_to_none(txt(prop["name"])), "amt": a_amt})
-
-    # 基本形は「紹介元＝やりとり先」。紹介元がまだ空なら、いま記録した相手を
-    # そのまま紹介元にする。ここを自動にしないと、同じ業者を2か所へ手で入れる
-    # ことになり、実際に食い違いが起きていた。
-    # 既に紹介元が入っているときは触らない（問い合わせ先が増えただけかもしれない）。
-    if kind_db == "sales_contact" and not txt(prop["source_office_id"]):
-        set_source(pid, office_id, person_ids[0] if person_ids else None)
+    _insert_interaction(office_id, kind_db, a_on, a_method, a_content, person_ids, a_amt)
 
     st.session_state[f"aseq_{pid}"] = seq + 1   # 入力欄を作り直して空に戻す
     st.rerun()
