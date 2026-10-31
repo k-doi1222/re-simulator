@@ -27,7 +27,7 @@ STATUS_LIST = statuses["status"].tolist()
 COLOR_OF = dict(zip(statuses["status"], statuses["row_color"]))
 
 # 決着がついた物件は既定では出さない。見たいときは「状況で絞る」に足す。
-CLOSED = ("終了", "見送り", "一旦断念", "値下がり待ち")
+CLOSED = ("終了", "見送り", "値下がり待ち")
 DEFAULT_STATUS = [s for s in STATUS_LIST if s not in CLOSED]
 
 # ── 絞り込み ────────────────────────────────────────────────
