@@ -374,19 +374,13 @@ def render_memo():
     sts = query("select status, description from re_property_statuses order by sort_order")
     opts = sts["status"].tolist()
     cur = txt(prop["status"]) if txt(prop["status"]) in opts else opts[0]
-    c = st.columns([2, 1, 5])
-    with c[0]:
-        new_st = st.selectbox("検討状況", opts, index=opts.index(cur),
-                              key=f"status_{prop['id']}",
-                              help="　".join(f"{r.status}＝{r.description}"
-                                             for _, r in sts.iterrows()))
-    with c[1]:
-        st.write("")
-        if st.button("保存", width="stretch", disabled=(new_st == cur),
-                     help="検討状況を保存します"):
-            execute("update re_properties set status = :s, updated_at = now() where id = :id",
-                    {"s": new_st, "id": str(prop["id"])})
-            st.rerun()
+    # 保存ボタンは検討状況とメモで1つにする。別々だと、メモを書いて検討状況の「保存」を
+    # 押し、メモだけ保存されないまま別の画面へ移って消えることがあった（2026-10-31）。
+    c = st.columns([2, 6])
+    new_st = c[0].selectbox("検討状況", opts, index=opts.index(cur),
+                            key=f"status_{prop['id']}",
+                            help="　".join(f"{r.status}＝{r.description}"
+                                           for _, r in sts.iterrows()))
 
     # st.form は送信するまで入力値が分からず、変更の有無でボタンの色を変えられない。
     # 全画面で振る舞いを揃えるため form は使わない。
@@ -395,13 +389,15 @@ def render_memo():
                             key=f"memo_m_{prop['id']}")
     m_broker = c[1].text_area("仲介業者コメント", txt(prop["broker_comment"]), height=150,
                               key=f"memo_b_{prop['id']}")
-    unchanged = (m_memo == txt(prop["memo"]) and m_broker == txt(prop["broker_comment"]))
-    if st.button("メモを保存", type="primary", key=f"memo_save_{prop['id']}",
-                 disabled=unchanged):
+    n = sum([new_st != cur, m_memo != txt(prop["memo"]),
+             m_broker != txt(prop["broker_comment"])])
+    if st.button(f"保存（{n} 項目）", type="primary", key=f"memo_save_{prop['id']}",
+                 disabled=(n == 0)):
         execute("""
-            update re_properties set memo = :memo, broker_comment = :broker, updated_at = now()
-            where id = :id
-        """, {"memo": blank_to_none(m_memo), "broker": blank_to_none(m_broker),
+            update re_properties
+               set status = :s, memo = :memo, broker_comment = :broker, updated_at = now()
+             where id = :id
+        """, {"s": new_st, "memo": blank_to_none(m_memo), "broker": blank_to_none(m_broker),
               "id": str(prop["id"])})
         st.toast("保存しました。", icon=":material/check:")
         st.rerun()
