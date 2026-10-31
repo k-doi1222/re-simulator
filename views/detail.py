@@ -702,30 +702,34 @@ def add_interaction_dialog():
     render_add_interaction()
 
 
-def _insert_interaction(office_id, kind_db, on, method, content, person_ids, amount) -> None:
-    """やりとり1件を、相手と物件につないで記録する。"""
+def _insert_interaction(office_id, kind_db, on, method, content, person_ids, amount,
+                        result=None) -> None:
+    """やりとり1件を、相手と物件につないで記録する。
+
+    content は紐づく全物件に出る話、result はこの物件だけの話。どちらかは空でよい。
+    """
     pid = str(prop["id"])
     iid = str(uuid.uuid4())
     execute("""
         insert into re_interactions (id, office_id, kind, occurred_on, method, content)
         values (cast(:id as uuid), cast(:oid as uuid), :k, :on, :method, :content)
     """, {"id": iid, "oid": office_id, "k": kind_db, "on": on,
-          "method": method, "content": content.strip()})
+          "method": method, "content": blank_to_none(content and content.strip())})
     for person_id in person_ids:
         execute("""
             insert into re_interaction_persons (id, interaction_id, person_id)
             values (cast(:id as uuid), cast(:iid as uuid), cast(:pid as uuid))
         """, {"id": str(uuid.uuid4()), "iid": iid, "pid": person_id})
 
-    # result（物件ごとの結果）は入れない。上の履歴は coalesce(result, content) で
-    # content に落ちるので空でも表示される。移行データのように content の写しを
-    # 作ると、あとで内容を直したときに写しの側だけ古いまま残る。
+    # content の写しを result に作らない。あとで内容を直したときに写しの側だけ
+    # 古いまま残るため。
     execute("""
         insert into re_interaction_properties
-          (id, interaction_id, property_id, property_name_raw, loanable_amount)
-        values (cast(:id as uuid), cast(:iid as uuid), cast(:pid as uuid), :raw, :amt)
+          (id, interaction_id, property_id, property_name_raw, loanable_amount, result)
+        values (cast(:id as uuid), cast(:iid as uuid), cast(:pid as uuid), :raw, :amt, :res)
     """, {"id": str(uuid.uuid4()), "iid": iid, "pid": pid,
-          "raw": blank_to_none(txt(prop["name"])), "amt": amount})
+          "raw": blank_to_none(txt(prop["name"])), "amt": amount,
+          "res": blank_to_none(result and result.strip())})
 
     # 基本形は「紹介元＝やりとり先」。紹介元がまだ空なら、いま記録した相手を
     # そのまま紹介元にする。ここを自動にしないと、同じ業者を2か所へ手で入れる
@@ -742,7 +746,11 @@ def _quick_add(office_id: str, kind_db: str, part: pd.DataFrame, persons: pd.Dat
     会社・拠点から選び直すので手間が大きかった。新しい相手のときだけ右上を使う。
     担当者の初期値は、直近のやりとりの相手のうち現任の人。異動で誰も残らないときは、
     現任が1人ならその人にする。
+    銀行は「この物件について」（result）に書く。物件の画面から書くのはこの物件の話で、
+    銀行の画面の流れ（content）は支店全体の話や複数物件にまたがる話に使うため。
+    そうした話は右上の「＋ やりとりを記録」から書く。
     """
+    is_bank = kind_db == "bank_inquiry"
     pid = str(prop["id"])
     here = persons[(persons["office_id"] == office_id) & persons["name"].notna()]
     current = here[here["is_current"]]["name"].tolist()
@@ -763,16 +771,19 @@ def _quick_add(office_id: str, kind_db: str, part: pd.DataFrame, persons: pd.Dat
             a_who = st.multiselect("担当者", current, default=default, key=k("who"))
             a_amt = (st.number_input("融資可能額（万円）", value=None, step=100.0,
                                      format="%.0f", key=k("amt"))
-                     if kind_db == "bank_inquiry" else None)
-            a_content = st.text_area("内容 *", height=110, key=k("con"))
+                     if is_bank else None)
+            label = "この物件について" if is_bank else "内容"
+            a_content = st.text_area(f"{label} *", height=110, key=k("con"))
             ok = st.form_submit_button("記録する", type="primary")
         if not ok:
             return
         if not a_content.strip():
-            st.error("内容 を入力してください。")
+            st.error(f"{label} を入力してください。")
             return
         person_ids = [str(here.loc[here["name"] == n, "id"].iloc[0]) for n in a_who]
-        _insert_interaction(office_id, kind_db, a_on, a_method, a_content, person_ids, a_amt)
+        _insert_interaction(office_id, kind_db, a_on, a_method,
+                            None if is_bank else a_content, person_ids, a_amt,
+                            result=a_content if is_bank else None)
         st.session_state[f"qseq_{pid}_{office_id}_{kind_db}"] = seq + 1
         st.toast("記録しました。", icon=":material/check:")
         st.rerun()
