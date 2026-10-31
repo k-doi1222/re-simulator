@@ -42,7 +42,7 @@ with st.form("new_property"):
     nego = c[3].number_input("指値後価格(万円)", value=None, step=10.0, format="%.0f",
                              help="空欄なら販売価格をそのまま使います")
     rate_pct = c[4].number_input("銀行提示金利(%)", value=None,
-                                 min_value=0.001, max_value=20.0, step=0.1, format="%.3f",
+                                 min_value=0.01, max_value=20.0, step=0.1, format="%.2f",
                                  help="例：2.5（2.5%）。空欄なら標準の2.0%で計算")
 
     c = st.columns(6)

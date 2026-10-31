@@ -73,6 +73,17 @@ LIVE_SQL = """
 # 目標判定に乗せる価格の逆算は、一覧と詳細で同じ結果になるよう
 # DB側の re_target_price(物件ID, 目標値) に寄せた（RAW_COLS で取得している）。
 
+# 金利を試しているときの目標判定。列名は RAW_COLS と同じ。
+LIVE_TARGET_SQL = """
+    select t150.price as t150_price, t150.discount_rate as t150_rate,
+           t150.cf_mark || t150.cf_value::text as t150_cf,
+           t200.price as t200_price, t200.discount_rate as t200_rate,
+           t200.cf_mark || t200.cf_value::text as t200_cf
+    from re_target_price_coef(cast(:id as uuid), cast(:rate as float8)) k
+    cross join lateral re_target_from_coef(k.am, k.kk, k.cc, 150) t150
+    cross join lateral re_target_from_coef(k.am, k.kk, k.cc, 200) t200
+"""
+
 UPDATE_SQL = """
     update re_properties set
       reply_date = :reply_date, address = :address, name = :name,
@@ -171,6 +182,37 @@ if len(versions) > 1:
 else:
     prop = versions.iloc[0]
 
+std_rate = float(query("select re_standard_interest_rate() as r").iloc[0]["r"])
+
+
+def clearable_number(col, label, cur, name, **kw):
+    """空欄に意味がある欄。値が入っていても消せるようにする。
+
+    value= に数値を渡すと消せない欄になるので、欄は value=None で作り、
+    今の値は session_state から入れる。DBの値が変わったときだけ入れ直す
+    （毎回入れると入力中の値が戻ってしまう）。キーは物件ごとに分ける。
+    """
+    key = f"{name}_{prop['id']}"
+    if key not in st.session_state or st.session_state.get(f"{key}_src") != cur:
+        st.session_state[key] = cur
+        st.session_state[f"{key}_src"] = cur
+    return col.number_input(label, value=None, key=key, **kw)
+
+
+def rate_input(col, name, **kw):
+    """銀行提示金利の欄。戻り値は小数（0.02＝2%）で、空欄なら None。
+
+    画面では%で入力してもらい、保存時に100で割って戻す（DBは 0.02＝2%）。
+    0は空欄（標準）と紛らわしく、20%超は単位の間違いなので入れられなくする。
+    """
+    cur = num(prop["bank_offered_rate"])
+    pct = clearable_number(
+        col, "銀行提示金利(%)", None if cur is None else round(cur * 100, 6), name,
+        min_value=0.01, max_value=20.0, step=0.1, format="%.2f",
+        help=f"例：2.5（2.5%）。空欄なら標準の{std_rate * 100:g}%で計算", **kw)
+    return None if pct is None else pct / 100
+
+
 def render_summary():
     """この物件の要点。上から順に「物件のこと」→「値段のこと」→「判定」で並べる。"""
     purchase_price = num(prop["purchase_price"])
@@ -188,7 +230,7 @@ def render_summary():
     # vertical_alignment="bottom" で、ラベルの有無に関わらず下端を揃える。
     # 「いくらで出ている → いくらにする → その判定 → 目標に乗る価格2つ」を1行に収める。
     # 判定は下の計算結果が要るので、列だけ先に作っておき、あとから中身を書き込む。
-    c = st.columns([1.45, 1.75, 0.8, 1.0, 1.6, 1.6], vertical_alignment="bottom")
+    c = st.columns([1.3, 1.5, 1.4, 0.8, 1.0, 1.5, 1.5], vertical_alignment="bottom")
     c[0].metric("販売価格", f"{purchase_price:,.0f} 万円" if purchase_price else "—",
                 help=f"{purchase_price:,.0f} 万円" if purchase_price else None)
     with c[1]:
@@ -196,25 +238,37 @@ def render_summary():
         ar = st.number_input(
             "指値後価格（万円）",
             value=float(num(prop["negotiated_price"]) or purchase_price or 0),
-            step=10.0, format="%.0f", key=f"ar_{prop['id']}")
-    with c[2]:
+            step=100.0, format="%.0f", key=f"ar_{prop['id']}")
+    bank_rate = rate_input(c[2], "top_rate", placeholder=f"標準 {std_rate * 100:g}%")
+    with c[3]:
         # ボタンの文字を長くすると、幅の狭い画面で1文字ずつ折り返す（実測565pxで8行）。
-        # 隣に対象（指値後価格の入力欄）が見えているので、表示は「保存」でよい。
+        # 隣に対象（入力欄）が見えているので、表示は「保存」でよい。
+        # 指値後価格と金利で1つにする。分けると片方だけ保存して消える（メモと同じ理由）。
         cur_ar = float(num(prop["negotiated_price"]) or purchase_price or 0)
+        cur_rate = num(prop["bank_offered_rate"])
+        rate_same = (bank_rate is None and cur_rate is None) or (
+            bank_rate is not None and cur_rate is not None and abs(bank_rate - cur_rate) < 1e-9)
         if st.button("保存", type="primary", width="stretch",
-                     help="指値後価格を保存します", disabled=(ar == cur_ar)):
-            execute("update re_properties set negotiated_price = :ar, updated_at = now() "
-                    "where id = :id", {"ar": ar, "id": str(prop["id"])})
+                     help="指値後価格と銀行提示金利を保存します",
+                     disabled=(ar == cur_ar and rate_same)):
+            execute("update re_properties set negotiated_price = :ar, bank_offered_rate = :rate, "
+                    "updated_at = now() where id = :id",
+                    {"ar": ar, "rate": bank_rate, "id": str(prop["id"])})
             st.toast("保存しました", icon=":material/check:")
             st.rerun()
 
     if not purchase_price:
         st.warning("販売価格が未入力のため、判定を計算できません。"
                    "下の「物件情報を直す」から入力してください。")
-        return None, None
+        return None, None, None
 
+    # 入力中の値で計算する。保存するまでDBも一覧も変わらないので、試すのに使える
+    live_rate = std_rate if bank_rate is None else bank_rate
     calc_in = {c: num(prop[c]) if c != "built_date" else day(prop[c]) for c in INPUT_COLS}
-    row = query(LIVE_SQL, {**calc_in, "ar": ar}).iloc[0]
+    row = query(LIVE_SQL, {**calc_in, "ar": ar, "interest_rate": live_rate}).iloc[0]
+    # 目標に乗せる価格は保存済みの金利で計算してある。金利を試している間だけ計算し直す
+    target = prop if rate_same else query(LIVE_TARGET_SQL, {"id": str(prop["id"]),
+                                                            "rate": live_rate}).iloc[0]
 
     # ── 判定まわり ───────────────────────────────────────
     def discount_pill(price):
@@ -256,14 +310,14 @@ def render_summary():
 
     # 2段目の残り（判定と、目標に乗せる価格2つ）。指値後価格は入力欄が兼ねるので
     # カードでは出さない（以前は入力欄とカードで2回出ていた）。
-    with c[3]:
-        card("CF基準", row["c_bu"] or "—", [discount_pill(ar)])
     with c[4]:
-        target_card("△150 にする指値後価格", num(prop["t150_price"]),
-                    num(prop["t150_rate"]), txt(prop["t150_cf"]))
+        card("CF基準", row["c_bu"] or "—", [discount_pill(ar)])
     with c[5]:
-        target_card("○200 にする指値後価格", num(prop["t200_price"]),
-                    num(prop["t200_rate"]), txt(prop["t200_cf"]))
+        target_card("△150 にする指値後価格", num(target["t150_price"]),
+                    num(target["t150_rate"]), txt(target["t150_cf"]))
+    with c[6]:
+        target_card("○200 にする指値後価格", num(target["t200_price"]),
+                    num(target["t200_rate"]), txt(target["t200_cf"]))
 
     # 3段目は物件の素性だけ
     c = st.columns([1, 1, 1, 1])
@@ -281,10 +335,10 @@ def render_summary():
     st.caption(f"構造 {txt(prop['structure']) or '未設定'}"
               f"・法定耐用年数 {prop['useful_life']:.0f}年"
               + (f"　／　{one_line(prop['import_note'])}" if txt(prop["import_note"]) else ""))
-    return ar, row
+    return ar, row, bank_rate
 
 
-def render_calc_detail(ar, row):
+def render_calc_detail(ar, row, bank_rate):
     """判定まわりの計算値。要点に入りきらないものはまとめてここに畳んでおく。
 
     3つのCFはどれも「収入 − 管理費 − 返済 − 追加費用 − 固都税」で、
@@ -305,10 +359,10 @@ def render_calc_detail(ar, row):
     tax_note = ("固都税（実額）" if tax_actual is not None
                 else "固都税（実額が未入力のため建物評価から仮計算）")
 
-    pct = f"{prop['interest_rate'] * 100:.3f}".rstrip("0")   # 2.000→2.0、1.875→1.875
+    used = std_rate if bank_rate is None else bank_rate   # 入力中の値。上の計算と同じもの
+    pct = f"{used * 100:.3f}".rstrip("0")   # 2.000→2.0、1.875→1.875
     pct += "0" if pct.endswith(".") else ""
-    rate_label = (f"金利{pct}%"
-                  + ("（銀行提示）" if num(prop["bank_offered_rate"]) is not None else "（標準）"))
+    rate_label = f"金利{pct}%" + ("（標準）" if bank_rate is None else "（銀行提示）")
     common = (
         f"\n\n**共通で差し引くもの**\n"
         f"- 管理費 {yen(row['c_ca'])}"
@@ -1163,28 +1217,7 @@ def render_edit_form():
                                     step=1.0, format="%.0f",
                                     help="CATV・インターネット・浄化槽の維持費などの年額")
 
-        def clearable_number(col, label, cur, name, **kw):
-            """空欄に意味がある欄。値が入っていても消せるようにする。
-
-            value= に数値を渡すと消せない欄になるので、欄は value=None で作り、
-            今の値は session_state から入れる。DBの値が変わったときだけ入れ直す
-            （毎回入れると入力中の値が戻ってしまう）。キーは物件ごとに分ける。
-            """
-            key = f"{name}_{prop['id']}"
-            if key not in st.session_state or st.session_state.get(f"{key}_src") != cur:
-                st.session_state[key] = cur
-                st.session_state[f"{key}_src"] = cur
-            return col.number_input(label, value=None, key=key, **kw)
-
-        # 金利は画面では%で入力してもらい、保存時に100で割って戻す（DBは 0.02＝2%）。
-        # 0は空欄（標準）と紛らわしく、20%超は単位の間違いなので入れられなくする
-        cur_rate = num(prop["bank_offered_rate"])
-        f_rate_pct = clearable_number(
-            c[3], "銀行提示金利(%)",
-            None if cur_rate is None else round(cur_rate * 100, 6), "edit_rate",
-            min_value=0.001, max_value=20.0, step=0.1, format="%.3f",
-            help="例：2.5（2.5%）。空欄なら標準の2.0%で計算")
-        f_rate = None if f_rate_pct is None else f_rate_pct / 100
+        f_rate = rate_input(c[3], "edit_rate")
         f_life = clearable_number(
             c[4], "耐用年数の上書き(年)", num(prop["legal_useful_life"]), "edit_life",
             step=1.0, format="%.0f",
@@ -1287,12 +1320,12 @@ def render_versions():
 
 # ── 描画 ────────────────────────────────────────────────────
 def render_main():
-    ar, row = render_summary()
+    ar, row, bank_rate = render_summary()
     render_memo()
     render_interactions()
     render_edit_form()
     # 計算値の内訳は、ふだんは見ない。物件情報のさらに下に畳んで置く
-    render_calc_detail(ar, row)
+    render_calc_detail(ar, row, bank_rate)
 
 
 # 版が1つだけならタブを出さず、まるごと1画面にする。
