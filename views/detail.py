@@ -237,8 +237,8 @@ def property_links(address: str, name: str) -> list:
     return [
         ("Googleマップ（物件名）", maps + quote(named) if name else ""),
         ("Googleマップ（住所）", maps + quote(address) if address else ""),
-        ("募集ページを検索", "https://www.google.com/search?q=" + quote(named) if name else ""),
         ("重ねるハザードマップ", hazard),
+        ("募集ページを検索", "https://www.google.com/search?q=" + quote(named) if name else ""),
     ]
 
 
@@ -1415,16 +1415,18 @@ def render_edit_form():
                              first_lot(txt(prop["address"])))
         st.caption("ハザードマップと全国地価マップは、住所から求めた地点の近くを開く（地番まで合わないことがある）。"
                    "全国地価マップは、同意したあと検索欄に貼り付けて検索すると正確な場所へ動く")
-        f_location = marked(st, prop, "location_note", st.text_input, "立地の概要",
+        c = st.columns([3, 1])
+        f_location = marked(c[0], prop, "location_note", st.text_input, "立地の概要",
                             value=txt(prop["location_note"]),
                             placeholder="どんな場所か思い出すためのメモ。例：〇〇の近く／〇〇と〇〇の間")
-        c = st.columns(3)
-        f_hazard = marked(c[0], prop, "hazard", st.text_input, "ハザード",
+        f_hazard = marked(c[1], prop, "hazard", st.text_input, "ハザード",
                           value=txt(prop["hazard"]), placeholder="例：浸水／土砂災害／津波5m")
-        f_pm = marked(c[1], prop, "management_company", st.text_input, "管理会社",
+        c = st.columns(2)
+        f_pm = marked(c[0], prop, "management_company", st.text_input, "管理会社",
                       value=txt(prop["management_company"]), placeholder="看板や資料で確認")
-        f_agents = marked(c[2], prop, "rental_agents", st.text_input, "仲介業者",
-                          value=txt(prop["rental_agents"]), placeholder="例：賃貸仲介の社名／一般媒介／〇〇専任")
+        f_agents = marked(c[1], prop, "rental_agents", st.text_input, "仲介業者",
+                          value=txt(prop["rental_agents"]),
+                          placeholder="例：賃貸仲介の社名／一般媒介／〇〇専任")
         c = st.columns(3)
         f_seller = marked(c[0], prop, "seller_info", st.text_input, "売主",
                           value=txt(prop["seller_info"]), placeholder="例：個人／法人／地主／土地と建物で売主が違う")
