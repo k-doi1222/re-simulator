@@ -122,10 +122,10 @@ def since_text(v) -> str:
     return "" if pd.isna(v) else f"{v.month}/{v.day}"
 
 
-view["銀"] = [since_text(v) for v in view["waiting_bank_since"]]
-view["業"] = [since_text(v) for v in view["waiting_broker_since"]]
+view["銀行"] = [since_text(v) for v in view["waiting_bank_since"]]
+view["業者"] = [since_text(v) for v in view["waiting_broker_since"]]
 
-COLS = ["状況", "銀", "業", "登録日付", "物件名", "所在地", "cf基準",
+COLS = ["状況", "銀行", "業者", "登録日付", "物件名", "所在地", "cf基準",
         "築年数", "価格", "満室利回り", "到達150", "150指値率",
         "入居状況", "積算比率", "メモ", "仲介業者コメント"]
 
@@ -133,7 +133,7 @@ filtered = len(df) < len(all_df)
 count_text = (f"{len(df):,} 件（全 {len(all_df):,} 件中）" if filtered else f"{len(df):,} 件")
 st.caption(f"{count_text}　—　行の左端をクリックすると詳細画面へ移動します　"
           "／　行の色は検討状況（下の「状況をまとめて変える」から変更できます）"
-          "　／　銀・業が橙の行は、自分がボールを持っている注力物件")
+          "　／　銀行・業者が橙の行は、自分がボールを持っている注力物件")
 
 
 def paint(row: pd.Series) -> list[str]:
@@ -145,8 +145,8 @@ def paint(row: pd.Series) -> list[str]:
     bg = COLOR_OF.get(row["状況"]) or "#FFFFFF"
     colors = [f"background-color: {bg}"] * len(row)
     # 注力なのに銀行にも業者にも問い合わせていない＝自分がボールを持っている
-    if row["状況"] == "注力" and not row["銀"] and not row["業"]:
-        for col in ("銀", "業"):
+    if row["状況"] == "注力" and not row["銀行"] and not row["業者"]:
+        for col in ("銀行", "業者"):
             colors[row.index.get_loc(col)] = "background-color: #FFD8B8"
     return colors
 
@@ -164,9 +164,9 @@ with st.container(key="fulltable"):
         column_config={
             # 物件名までは横スクロールしても左に残す（どの物件の行か見失わないように）
             "状況":       st.column_config.TextColumn("状況", width="small", pinned=True),
-            "銀":         st.column_config.TextColumn("銀", width=50, pinned=True,
+            "銀行":       st.column_config.TextColumn("銀行", width=50, pinned=True,
                                                       help="銀行に問い合わせた日。回答待ちの間だけ入る"),
-            "業":         st.column_config.TextColumn("業", width=50, pinned=True,
+            "業者":       st.column_config.TextColumn("業者", width=50, pinned=True,
                                                       help="売買仲介に問い合わせた日。回答待ちの間だけ入る"),
             "登録日付":   st.column_config.DateColumn("登録日付", format="YYYY-MM-DD",
                                                       pinned=True),
