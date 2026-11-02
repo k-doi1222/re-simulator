@@ -1404,6 +1404,9 @@ def render_edit_form():
 
         # 確認事項。どれも計算には使わないが、取り組むかの判断に使い、後で見返す。
         # 空欄を暖色にして、まだ確認していない項目が分かるようにする（check_input）
+        # 確認事項の手前にも保存ボタンを置く。押せるかどうかは確認事項の入力まで見ないと
+        # 決まらないので、場所だけ取っておき、下で changed を出してから中身を入れる
+        save_top = st.container()
         st.divider()
         st.markdown("**確認事項**")
         links = property_links(txt(prop["address"]), txt(prop["name"]))
@@ -1479,10 +1482,13 @@ def render_edit_form():
             return txt(cur) == ("" if v is None else str(v))
 
         changed = [k for k, v in after.items() if not same(k, v)]
-        saved = st.button(f"物件情報を保存（{len(changed)} 項目）", type="primary",
+        save_label = f"物件情報を保存（{len(changed)} 項目）"
+        saved_top = save_top.button(save_label, type="primary",
+                                    key=f"edit_save_top_{prop['id']}", disabled=not changed)
+        saved = st.button(save_label, type="primary",
                           key=f"edit_save_{prop['id']}", disabled=not changed)
 
-    if saved:
+    if saved or saved_top:
         execute(UPDATE_SQL, {
             "id": str(prop["id"]),
             "reply_date": f_reply, "address": blank_to_none(f_addr),
