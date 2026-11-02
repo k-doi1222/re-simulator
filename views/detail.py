@@ -43,7 +43,7 @@ RAW_COLS = """
     p.occupied_units, p.total_units, p.parking_spaces, p.external_parking,
     p.has_elevator, p.has_septic_tank, p.free_internet, p.hazard,
     p.waiting_bank_since, p.waiting_broker_since,
-    p.no_road_price, p.floor_plan, p.management_company, p.rental_agents, p.seller_info, p.lender, p.loan_terms,
+    p.no_road_price, p.location_note, p.floor_plan, p.management_company, p.rental_agents, p.seller_info, p.lender, p.loan_terms,
     p.legal_useful_life, p.bank_offered_rate, p.scenario_label,
     coalesce(p.legal_useful_life, re_useful_life_by_structure(p.structure)) as useful_life,
     -- 金利は銀行提示金利を優先し、空なら標準（re_standard_interest_rate）。一覧のキャッシュと同じ決め方
@@ -108,6 +108,7 @@ UPDATE_SQL = """
       full_income = :full_income, current_income = :current_income, extra_cost = :extra_cost,
       bank_offered_rate = :bank_offered_rate, legal_useful_life = :legal_useful_life,
       scenario_label = :scenario_label, input_memo = :input_memo,
+      location_note = :location_note,
       floor_plan = :floor_plan, management_company = :management_company,
       rental_agents = :rental_agents, seller_info = :seller_info,
       lender = :lender, loan_terms = :loan_terms,
@@ -1414,6 +1415,9 @@ def render_edit_form():
                              first_lot(txt(prop["address"])))
         st.caption("ハザードマップと全国地価マップは、住所から求めた地点の近くを開く（地番まで合わないことがある）。"
                    "全国地価マップは、同意したあと検索欄に貼り付けて検索すると正確な場所へ動く")
+        f_location = marked(st, prop, "location_note", st.text_input, "立地の概要",
+                            value=txt(prop["location_note"]),
+                            placeholder="どんな場所か思い出すためのメモ。例：〇〇の近く／〇〇と〇〇の間")
         c = st.columns(3)
         f_hazard = marked(c[0], prop, "hazard", st.text_input, "ハザード",
                           value=txt(prop["hazard"]), placeholder="例：浸水／土砂災害／津波5m")
@@ -1449,6 +1453,7 @@ def render_edit_form():
             "bank_offered_rate": f_rate, "legal_useful_life": f_life,
             "scenario_label": blank_to_none(f_label),
             "input_memo": blank_to_none(f_input_memo),
+            "location_note": blank_to_none(f_location),
             "floor_plan": blank_to_none(f_plan), "management_company": blank_to_none(f_pm),
             "rental_agents": blank_to_none(f_agents), "seller_info": blank_to_none(f_seller),
             "lender": blank_to_none(f_lender), "loan_terms": blank_to_none(f_terms),
@@ -1498,6 +1503,7 @@ def render_edit_form():
             "bank_offered_rate": f_rate, "legal_useful_life": f_life,
             "scenario_label": blank_to_none(f_label),
             "input_memo": blank_to_none(f_input_memo),
+            "location_note": blank_to_none(f_location),
             "floor_plan": blank_to_none(f_plan), "management_company": blank_to_none(f_pm),
             "rental_agents": blank_to_none(f_agents), "seller_info": blank_to_none(f_seller),
             "lender": blank_to_none(f_lender), "loan_terms": blank_to_none(f_terms),
