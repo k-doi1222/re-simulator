@@ -141,6 +141,15 @@ def geocode(address: str):
         return None
 
 
+def to_tokyo_datum(lon: float, lat: float) -> tuple:
+    """世界測地系を日本測地系へ直す（近似式）。全国地価マップの URL は日本測地系で受け取る。
+
+    直さないと約450mずれる（松阪市で実測。gprj を付けても変わらなかった）。
+    """
+    return (lon + 0.000046038 * lat + 0.000083043 * lon - 0.010040,
+            lat + 0.00010695 * lat - 0.000017464 * lon - 0.0046017)
+
+
 def city_of(address: str) -> str:
     """住所から市町村名を取り出す。「四日市市」のように名前に市を含むものに気をつける。"""
     m = re.match(r"(?:.+?[都道府県])?(四日市市|廿日市市|野々市市|.+?郡.+?[町村]|.+?[市区町村])", address)
@@ -158,8 +167,9 @@ def property_links(address: str, name: str) -> list:
     chika = f"https://www.chikamap.jp/chikamap/Portal?mid={CHIKAMAP_ROSENKA_MID}"
     if pos:
         hazard += f"?ll={pos[1]},{pos[0]}&z=16&base=pale&{HAZARD_LAYERS}"
+        lon, lat = to_tokyo_datum(*pos)
         chika = (f"https://www.chikamap.jp/chikamap/Map?mid={CHIKAMAP_ROSENKA_MID}"
-                 f"&mpx={pos[0]}&mpy={pos[1]}&mps=1000&gprj=3")
+                 f"&mpx={lon:.7f}&mpy={lat:.7f}&mps=1000")
     return [
         ("Googleマップ（物件名）", maps + quote(named) if name else ""),
         ("Googleマップ（住所）", maps + quote(address) if address else ""),
