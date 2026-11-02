@@ -9,9 +9,11 @@ PMT・税金などの計算式そのものはすべてSQL側の re_calc_property
 2点だけ実際に評価してもらい、そこから「判定値150/200に乗る価格」を代数で解く。
 """
 import datetime
+import json
 import re
 import uuid
 from urllib.parse import quote
+from urllib.request import urlopen
 
 import pandas as pd
 import streamlit as st
@@ -110,6 +112,61 @@ UPDATE_SQL = """
 """
 
 ARINASHI = ["", "あり", "なし"]
+
+
+# 全国地価マップの相続税路線価の地図番号。新しい年分が公開されたら番号が変わる（322=令和4年分 … 325=令和7年分）
+CHIKAMAP_ROSENKA_MID = 325
+# 重ねるハザードマップで、洪水・土砂災害・高潮・津波を表示した状態の URL の指定（画面で選んで写した値）
+HAZARD_LAYERS = (
+    "ls=seamless%7Cflood_l2_kaokutoukai_kagan%2C0.8%7Cflood_l2_kaokutoukai_hanran%2C0.8"
+    "%7Cflood_l2_keizoku%2C0.8%7Cflood_list%2C0.8%7Cflood_l1%2C0.8%7Ctameike_raster%2C0.8"
+    "%7Cnaisui_raster%2C0.8%7Cflood_list_l2%2C0.75%7Cdosha_kiken_nadare%2C0.8"
+    "%7Cdosha_keikai_jisuberi%2C0.8%7Cdosha_keikai_dosekiryu%2C0.8%7Cdosha_keikai_kyukeisha%2C0.8"
+    "%7Ctakashio_sinsuisin_raster%2C0.8%7Cekijouka_zenkoku%2C0.8%7Ctsunamishinsui_raster%2C0.8"
+    "%7Cdisaster1%7Cdisaster2%7Cdisaster3%7Cdisaster5&disp=00000011101111010000"
+)
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def geocode(address: str):
+    """住所を (経度, 緯度) にする（国土地理院）。取れなければ None。複数の地番は先頭だけ使う。"""
+    first = re.split(r"[、,・]", address)[0].strip()
+    if not first:
+        return None
+    url = "https://msearch.gsi.go.jp/address-search/AddressSearch?q=" + quote(first)
+    try:
+        with urlopen(url, timeout=3) as res:
+            return tuple(json.load(res)[0]["geometry"]["coordinates"])
+    except (OSError, ValueError, LookupError):
+        return None
+
+
+def city_of(address: str) -> str:
+    """住所から市町村名を取り出す。「四日市市」のように名前に市を含むものに気をつける。"""
+    m = re.match(r"(?:.+?[都道府県])?(四日市市|廿日市市|野々市市|.+?郡.+?[町村]|.+?[市区町村])", address)
+    return m[1] if m else ""
+
+
+def property_links(address: str, name: str) -> list:
+    """確認事項のリンク（ボタン名, URL）。URL が空ならボタンは押せない。"""
+    # 物件名の2行目以降は版の注記なので検索語に入れない
+    name = name.split("\n")[0].strip()
+    named = f"{city_of(address)} {name}".strip()
+    maps = "https://www.google.com/maps/search/?api=1&query="
+    pos = geocode(address)
+    hazard = "https://disaportal.gsi.go.jp/hazardmap/maps/index.html"
+    chika = f"https://www.chikamap.jp/chikamap/Portal?mid={CHIKAMAP_ROSENKA_MID}"
+    if pos:
+        hazard += f"?ll={pos[1]},{pos[0]}&z=16&base=pale&{HAZARD_LAYERS}"
+        chika = (f"https://www.chikamap.jp/chikamap/Map?mid={CHIKAMAP_ROSENKA_MID}"
+                 f"&mpx={pos[0]}&mpy={pos[1]}&mps=1000&gprj=3")
+    return [
+        ("Googleマップ（物件名）", maps + quote(named) if name else ""),
+        ("Googleマップ（住所）", maps + quote(address) if address else ""),
+        ("募集ページを検索", "https://www.google.com/search?q=" + quote(named) if name else ""),
+        ("重ねるハザードマップ", hazard),
+        ("全国地価マップ", chika),
+    ]
 
 
 def marked(col, prop, column, widget, label, *, blue=False, filled=False, **kw):
@@ -1269,16 +1326,11 @@ def render_edit_form():
         # 空欄を暖色にして、まだ確認していない項目が分かるようにする（check_input）
         st.divider()
         st.markdown("**確認事項**")
-        address = quote(txt(prop["address"]))
-        c = st.columns([2, 1, 2, 3])
-        c[0].link_button("地図・ストリートビュー",
-                         f"https://www.google.com/maps/search/?api=1&query={address}",
-                         use_container_width=True, disabled=not address)
-        c[1].link_button("航空写真", f"https://www.google.com/maps/place/{address}/data=!3m1!1e3",
-                         use_container_width=True, disabled=not address)
-        c[2].link_button("募集ページを検索",
-                         "https://www.google.com/search?q=" + quote(f"{txt(prop['address'])} 賃貸 募集"),
-                         use_container_width=True, disabled=not address)
+        links = property_links(txt(prop["address"]), txt(prop["name"]))
+        for col, (label, url) in zip(st.columns(len(links)), links):
+            col.link_button(label, url, use_container_width=True, disabled=not url)
+        st.caption("ハザードマップと全国地価マップは、住所から求めた地点を開く（地番まで合わず町の中心になることがある）。"
+                   "全国地価マップは「同意する」を押すとその地点へ進む")
         c = st.columns(3)
         f_hazard = marked(c[0], prop, "hazard", st.text_input, "ハザード",
                           value=txt(prop["hazard"]), placeholder="例：浸水／土砂災害／津波5m")
