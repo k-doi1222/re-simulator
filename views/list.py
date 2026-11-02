@@ -53,7 +53,8 @@ all_df = query("""
            v."版", v."版数", v."最新版", v."元excel行",
            v."登録日付", v."物件名", v."所在地", v."cf基準", v."到達150", v."到達200",
            v."築年数", v."販売価格", v."指値後価格", v."入居数", v."戸数", v."積算比率",
-           v."メモ", v."仲介業者コメント", v."構造", v."満室利回", v."実質cf", v."紹介元会社"
+           v."メモ", v."仲介業者コメント", v."構造", v."満室利回", v."実質cf", v."紹介元会社",
+           p.waiting_bank_since, p.waiting_broker_since
     from re_properties_v v
     join re_properties p on p.id = v.id
     where (not :latest_only or v."最新版")
@@ -114,14 +115,25 @@ for col in ["物件名", "所在地", "状況", "cf基準"]:
 # ○200 は列をやめた（2026-09-20 ユーザー判断。詳細画面では今までどおり出る）。
 view["150指値率"] = (1 - view["到達150"] / view["販売価格"]) * 100
 
-COLS = ["状況", "登録日付", "物件名", "所在地", "cf基準",
+
+
+def since_text(v) -> str:
+    """回答待ちの日付を短く出す。空なら待っていない。"""
+    return "" if pd.isna(v) else f"{v.month}/{v.day}"
+
+
+view["銀"] = [since_text(v) for v in view["waiting_bank_since"]]
+view["業"] = [since_text(v) for v in view["waiting_broker_since"]]
+
+COLS = ["状況", "銀", "業", "登録日付", "物件名", "所在地", "cf基準",
         "築年数", "価格", "満室利回り", "到達150", "150指値率",
         "入居状況", "積算比率", "メモ", "仲介業者コメント"]
 
 filtered = len(df) < len(all_df)
 count_text = (f"{len(df):,} 件（全 {len(all_df):,} 件中）" if filtered else f"{len(df):,} 件")
 st.caption(f"{count_text}　—　行の左端をクリックすると詳細画面へ移動します　"
-          "／　行の色は検討状況（下の「状況をまとめて変える」から変更できます）")
+          "／　行の色は検討状況（下の「状況をまとめて変える」から変更できます）"
+          "　／　銀・業が橙の行は、自分がボールを持っている注力物件")
 
 
 def paint(row: pd.Series) -> list[str]:
@@ -131,7 +143,12 @@ def paint(row: pd.Series) -> list[str]:
     塗らないつもりの状況（確認中）も白を明示する。
     """
     bg = COLOR_OF.get(row["状況"]) or "#FFFFFF"
-    return [f"background-color: {bg}"] * len(row)
+    colors = [f"background-color: {bg}"] * len(row)
+    # 注力なのに銀行にも業者にも問い合わせていない＝自分がボールを持っている
+    if row["状況"] == "注力" and not row["銀"] and not row["業"]:
+        for col in ("銀", "業"):
+            colors[row.index.get_loc(col)] = "background-color: #FFD8B8"
+    return colors
 
 
 styled = view[COLS].style.apply(paint, axis=1)
@@ -147,6 +164,10 @@ with st.container(key="fulltable"):
         column_config={
             # 物件名までは横スクロールしても左に残す（どの物件の行か見失わないように）
             "状況":       st.column_config.TextColumn("状況", width="small", pinned=True),
+            "銀":         st.column_config.TextColumn("銀", width=50, pinned=True,
+                                                      help="銀行に問い合わせた日。回答待ちの間だけ入る"),
+            "業":         st.column_config.TextColumn("業", width=50, pinned=True,
+                                                      help="売買仲介に問い合わせた日。回答待ちの間だけ入る"),
             "登録日付":   st.column_config.DateColumn("登録日付", format="YYYY-MM-DD",
                                                       pinned=True),
             "物件名":     st.column_config.TextColumn("物件名", width="medium", pinned=True),
