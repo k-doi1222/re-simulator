@@ -11,6 +11,7 @@ PMT・税金などの計算式そのものはすべてSQL側の re_calc_property
 import datetime
 import re
 import uuid
+from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
@@ -36,6 +37,7 @@ RAW_COLS = """
     p.property_tax,
     p.occupied_units, p.total_units, p.parking_spaces, p.external_parking,
     p.has_elevator, p.has_septic_tank, p.free_internet, p.hazard,
+    p.floor_plan, p.management_company, p.rental_agents, p.seller_info, p.lender, p.loan_terms,
     p.legal_useful_life, p.bank_offered_rate, p.scenario_label,
     coalesce(p.legal_useful_life, re_useful_life_by_structure(p.structure)) as useful_life,
     -- 金利は銀行提示金利を優先し、空なら標準（re_standard_interest_rate）。一覧のキャッシュと同じ決め方
@@ -100,11 +102,23 @@ UPDATE_SQL = """
       full_income = :full_income, current_income = :current_income, extra_cost = :extra_cost,
       bank_offered_rate = :bank_offered_rate, legal_useful_life = :legal_useful_life,
       scenario_label = :scenario_label, input_memo = :input_memo,
+      floor_plan = :floor_plan, management_company = :management_company,
+      rental_agents = :rental_agents, seller_info = :seller_info,
+      lender = :lender, loan_terms = :loan_terms,
       updated_at = now()
     where id = :id
 """
 
 ARINASHI = ["", "あり", "なし"]
+
+
+def check_input(col, prop, column, label, placeholder):
+    """確認事項の入力欄。空欄の間は暖色で出す（色は theme.compact_css の check_empty）。"""
+    key = f"check_{prop['id']}_{column}"
+    value = st.session_state.get(key, txt(prop[column]))
+    state = "ok" if str(value).strip() else "empty"
+    with col.container(key=f"check_{state}_{column}"):
+        return st.text_input(label, txt(prop[column]), key=key, placeholder=placeholder)
 
 
 def num(v):
@@ -1161,12 +1175,12 @@ def render_edit_form():
         f_septic = pick(c[1], "浄化槽", prop["has_septic_tank"])
         f_net = pick(c[2], "無料NET/CATV", prop["free_internet"],
                      help="元Excel AD列。ケーブルテレビ・インターネットの無料提供")
-        f_hazard = c[3].text_input("ハザード", txt(prop["hazard"]),
-                                   help="例：浸水／土砂災害／津波5m")
-        f_occ = c[4].number_input("入居数", value=num(prop["occupied_units"]),
+        f_occ = c[3].number_input("入居数", value=num(prop["occupied_units"]),
                                   step=1.0, format="%.0f")
-        f_total = c[5].number_input("戸数", value=num(prop["total_units"]),
+        f_total = c[4].number_input("戸数", value=num(prop["total_units"]),
                                     step=1.0, format="%.0f")
+        # 駐車場の必要数は間取りで戸数の100〜300%に変わるので、戸数と駐車場の間に置く
+        f_plan = check_input(c[5], prop, "floor_plan", "間取り", "2LDK／1K")
         f_park = c[6].number_input("駐車場", value=num(prop["parking_spaces"]),
                                    step=1.0, format="%.0f")
         f_expark = c[7].text_input("敷地外駐車場", txt(prop["external_parking"]))
@@ -1223,6 +1237,31 @@ def render_edit_form():
             step=1.0, format="%.0f",
             help=f"通常は空欄。空欄なら構造から自動で {prop['useful_life']:.0f} 年")
 
+        # 確認事項。どれも計算には使わないが、取り組むかの判断に使い、後で見返す。
+        # 空欄を暖色にして、まだ確認していない項目が分かるようにする（check_input）
+        st.divider()
+        st.markdown("**確認事項**")
+        address = quote(txt(prop["address"]))
+        c = st.columns([2, 1, 2, 3])
+        c[0].link_button("地図・ストリートビュー",
+                         f"https://www.google.com/maps/search/?api=1&query={address}",
+                         use_container_width=True, disabled=not address)
+        c[1].link_button("航空写真", f"https://www.google.com/maps/place/{address}/data=!3m1!1e3",
+                         use_container_width=True, disabled=not address)
+        c[2].link_button("募集ページを検索",
+                         "https://www.google.com/search?q=" + quote(f"{txt(prop['address'])} 賃貸 募集"),
+                         use_container_width=True, disabled=not address)
+        c = st.columns(3)
+        f_hazard = check_input(c[0], prop, "hazard", "ハザード", "例：浸水／土砂災害／津波5m")
+        f_pm = check_input(c[1], prop, "management_company", "管理会社", "看板や資料で確認")
+        f_agents = check_input(c[2], prop, "rental_agents", "仲介業者",
+                               "例：賃貸仲介の社名／一般媒介／〇〇専任")
+        c = st.columns(3)
+        f_seller = check_input(c[0], prop, "seller_info", "売主",
+                               "例：個人／法人／地主／土地と建物で売主が違う")
+        f_lender = check_input(c[1], prop, "lender", "借入先", "分かれば。例：〇〇銀行")
+        f_terms = check_input(c[2], prop, "loan_terms", "借入金額・利率", "例：6000万円 2.0%")
+
         after = {
             "reply_date": f_reply, "address": blank_to_none(f_addr),
             "name": blank_to_none(f_name),
@@ -1243,6 +1282,9 @@ def render_edit_form():
             "bank_offered_rate": f_rate, "legal_useful_life": f_life,
             "scenario_label": blank_to_none(f_label),
             "input_memo": blank_to_none(f_input_memo),
+            "floor_plan": blank_to_none(f_plan), "management_company": blank_to_none(f_pm),
+            "rental_agents": blank_to_none(f_agents), "seller_info": blank_to_none(f_seller),
+            "lender": blank_to_none(f_lender), "loan_terms": blank_to_none(f_terms),
         }
 
         def same(k, v):
@@ -1287,6 +1329,9 @@ def render_edit_form():
             "bank_offered_rate": f_rate, "legal_useful_life": f_life,
             "scenario_label": blank_to_none(f_label),
             "input_memo": blank_to_none(f_input_memo),
+            "floor_plan": blank_to_none(f_plan), "management_company": blank_to_none(f_pm),
+            "rental_agents": blank_to_none(f_agents), "seller_info": blank_to_none(f_seller),
+            "lender": blank_to_none(f_lender), "loan_terms": blank_to_none(f_terms),
         })
         st.toast("保存しました。", icon=":material/check:")
         st.rerun()

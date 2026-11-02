@@ -43,6 +43,10 @@ def compact_css(table_vh: str = TABLE_VH) -> None:
       div[class*="st-key-editline"] button:hover p,
       div[class*="st-key-editline"] button:hover span {{ color: #1d1d1f; }}
 
+      /* 物件の確認事項。空欄（まだ確認していない項目）を暖色で目立たせる。 */
+      div[class*="st-key-check_empty"] input {{ background-color: #FFD8B8; }}
+      div[class*="st-key-check_empty"] label p {{ color: #B8480A; font-weight: 600; }}
+
       /* 担当者のまとめメモ（第2層）。長いものは「続きを読む」で畳む。
          枠を増やさないよう、Streamlitのexpanderではなく details で作っている。 */
       .memo {{ line-height: 1.6; }}
