@@ -97,7 +97,7 @@ UPDATE_SQL = """
       reply_date = :reply_date, address = :address, name = :name,
       contact_method = :contact_method, inquiry_channel = :inquiry_channel,
       has_elevator = :has_elevator, has_septic_tank = :has_septic_tank,
-      free_internet = :free_internet, hazard = :hazard,
+      free_internet = :free_internet,
       occupied_units = :occupied_units, total_units = :total_units,
       parking_spaces = :parking_spaces, external_parking = :external_parking,
       structure = :structure, built_date = :built_date,
@@ -108,10 +108,7 @@ UPDATE_SQL = """
       full_income = :full_income, current_income = :current_income, extra_cost = :extra_cost,
       bank_offered_rate = :bank_offered_rate, legal_useful_life = :legal_useful_life,
       scenario_label = :scenario_label, input_memo = :input_memo,
-      location_note = :location_note,
-      floor_plan = :floor_plan, management_company = :management_company,
-      rental_agents = :rental_agents, seller_info = :seller_info,
-      lender = :lender, loan_terms = :loan_terms,
+      floor_plan = :floor_plan,
       updated_at = now()
     where id = :id
 """
@@ -600,19 +597,59 @@ def render_memo():
                             key=f"memo_m_{prop['id']}")
     m_broker = c[1].text_area("仲介業者コメント", txt(prop["broker_comment"]), height=150,
                               key=f"memo_b_{prop['id']}")
+
+    # 確認事項。どれも計算には使わないが、取り組むかの判断に使い、後で見返す。
+    # 空欄を暖色にして、まだ確認していない項目が分かるようにする（marked）。
+    # よく見るので物件情報の入力欄から出した。保存ボタンはメモと1つにする（上の理由と同じ）
+    st.markdown("**確認事項**")
+    links = property_links(txt(prop["address"]), txt(prop["name"]))
+    cols = st.columns(len(links) + 1)
+    for col, (label, url) in zip(cols, links):
+        col.link_button(label, url, use_container_width=True, disabled=not url)
+    with cols[-1]:
+        copy_link_button("全国地価マップ（住所コピー）", chikamap_url(txt(prop["address"])),
+                         first_lot(txt(prop["address"])))
+    st.caption("ハザードマップと全国地価マップは、住所から求めた地点の近くを開く（地番まで合わないことがある）。"
+               "全国地価マップは、同意したあと検索欄に貼り付けて検索すると正確な場所へ動く")
+    # 地図を見て埋める項目を先に、そのあとにハザードを置く
+    f_location = marked(st, prop, "location_note", st.text_input, "立地の概要",
+                        value=txt(prop["location_note"]),
+                        placeholder="どんな場所か思い出すためのメモ。例：〇〇の近く／〇〇と〇〇の間")
+    c = st.columns(3)
+    f_pm = marked(c[0], prop, "management_company", st.text_input, "管理会社",
+                  value=txt(prop["management_company"]), placeholder="看板や資料で確認")
+    f_agents = marked(c[1], prop, "rental_agents", st.text_input, "仲介業者",
+                      value=txt(prop["rental_agents"]),
+                      placeholder="例：賃貸仲介の社名／一般媒介／〇〇専任")
+    f_hazard = marked(c[2], prop, "hazard", st.text_input, "ハザード",
+                      value=txt(prop["hazard"]), placeholder="例：浸水／土砂災害／津波5m")
+    c = st.columns(3)
+    f_seller = marked(c[0], prop, "seller_info", st.text_input, "売主",
+                      value=txt(prop["seller_info"]), placeholder="例：個人／法人／地主／土地と建物で売主が違う")
+    f_lender = marked(c[1], prop, "lender", st.text_input, "借入先",
+                      value=txt(prop["lender"]), placeholder="分かれば。例：〇〇銀行")
+    f_terms = marked(c[2], prop, "loan_terms", st.text_input, "借入金額・利率",
+                     value=txt(prop["loan_terms"]), placeholder="例：6000万円 2.0%")
+    checks = {"location_note": f_location, "management_company": f_pm, "rental_agents": f_agents,
+              "hazard": f_hazard, "seller_info": f_seller, "lender": f_lender, "loan_terms": f_terms}
     n = sum([new_st != cur, m_memo != txt(prop["memo"]),
              m_broker != txt(prop["broker_comment"]),
-             new_bank != bank_since, new_broker != broker_since])
+             new_bank != bank_since, new_broker != broker_since,
+             *[v != txt(prop[k]) for k, v in checks.items()]])
     if st.button(f"保存（{n} 項目）", type="primary", key=f"memo_save_{prop['id']}",
                  disabled=(n == 0)):
         execute("""
             update re_properties
                set status = :s, memo = :memo, broker_comment = :broker,
                    waiting_bank_since = :bank, waiting_broker_since = :broker_since,
+                   location_note = :location_note, management_company = :management_company,
+                   rental_agents = :rental_agents, hazard = :hazard, seller_info = :seller_info,
+                   lender = :lender, loan_terms = :loan_terms,
                    updated_at = now()
              where id = :id
         """, {"s": new_st, "memo": blank_to_none(m_memo), "broker": blank_to_none(m_broker),
-              "bank": new_bank, "broker_since": new_broker, "id": str(prop["id"])})
+              "bank": new_bank, "broker_since": new_broker, "id": str(prop["id"]),
+              **{k: blank_to_none(v) for k, v in checks.items()}})
         st.toast("保存しました。", icon=":material/check:")
         st.rerun()
 
@@ -1402,49 +1439,13 @@ def render_edit_form():
             step=1.0, format="%.0f",
             help=f"通常は空欄。空欄なら構造から自動で {prop['useful_life']:.0f} 年")
 
-        # 確認事項。どれも計算には使わないが、取り組むかの判断に使い、後で見返す。
-        # 空欄を暖色にして、まだ確認していない項目が分かるようにする（check_input）
-        # 確認事項の手前にも保存ボタンを置く。押せるかどうかは確認事項の入力まで見ないと
-        # 決まらないので、場所だけ取っておき、下で changed を出してから中身を入れる
-        save_top = st.container()
-        st.divider()
-        st.markdown("**確認事項**")
-        links = property_links(txt(prop["address"]), txt(prop["name"]))
-        cols = st.columns(len(links) + 1)
-        for col, (label, url) in zip(cols, links):
-            col.link_button(label, url, use_container_width=True, disabled=not url)
-        with cols[-1]:
-            copy_link_button("全国地価マップ（住所コピー）", chikamap_url(txt(prop["address"])),
-                             first_lot(txt(prop["address"])))
-        st.caption("ハザードマップと全国地価マップは、住所から求めた地点の近くを開く（地番まで合わないことがある）。"
-                   "全国地価マップは、同意したあと検索欄に貼り付けて検索すると正確な場所へ動く")
-        # 地図を見て埋める項目を先に、そのあとにハザードを置く
-        f_location = marked(st, prop, "location_note", st.text_input, "立地の概要",
-                            value=txt(prop["location_note"]),
-                            placeholder="どんな場所か思い出すためのメモ。例：〇〇の近く／〇〇と〇〇の間")
-        c = st.columns(3)
-        f_pm = marked(c[0], prop, "management_company", st.text_input, "管理会社",
-                      value=txt(prop["management_company"]), placeholder="看板や資料で確認")
-        f_agents = marked(c[1], prop, "rental_agents", st.text_input, "仲介業者",
-                          value=txt(prop["rental_agents"]),
-                          placeholder="例：賃貸仲介の社名／一般媒介／〇〇専任")
-        f_hazard = marked(c[2], prop, "hazard", st.text_input, "ハザード",
-                          value=txt(prop["hazard"]), placeholder="例：浸水／土砂災害／津波5m")
-        c = st.columns(3)
-        f_seller = marked(c[0], prop, "seller_info", st.text_input, "売主",
-                          value=txt(prop["seller_info"]), placeholder="例：個人／法人／地主／土地と建物で売主が違う")
-        f_lender = marked(c[1], prop, "lender", st.text_input, "借入先",
-                          value=txt(prop["lender"]), placeholder="分かれば。例：〇〇銀行")
-        f_terms = marked(c[2], prop, "loan_terms", st.text_input, "借入金額・利率",
-                         value=txt(prop["loan_terms"]), placeholder="例：6000万円 2.0%")
-
         after = {
             "reply_date": f_reply, "address": blank_to_none(f_addr),
             "name": blank_to_none(f_name),
             "contact_method": blank_to_none(f_contact),
             "inquiry_channel": blank_to_none(f_channel),
             "has_elevator": blank_to_none(f_ev), "has_septic_tank": blank_to_none(f_septic),
-            "free_internet": blank_to_none(f_net), "hazard": blank_to_none(f_hazard),
+            "free_internet": blank_to_none(f_net),
             "occupied_units": f_occ, "total_units": f_total,
             "parking_spaces": f_park, "external_parking": blank_to_none(f_expark),
             "structure": f_struct, "built_date": f_built,
@@ -1458,10 +1459,7 @@ def render_edit_form():
             "bank_offered_rate": f_rate, "legal_useful_life": f_life,
             "scenario_label": blank_to_none(f_label),
             "input_memo": blank_to_none(f_input_memo),
-            "location_note": blank_to_none(f_location),
-            "floor_plan": blank_to_none(f_plan), "management_company": blank_to_none(f_pm),
-            "rental_agents": blank_to_none(f_agents), "seller_info": blank_to_none(f_seller),
-            "lender": blank_to_none(f_lender), "loan_terms": blank_to_none(f_terms),
+            "floor_plan": blank_to_none(f_plan),
         }
 
         def same(k, v):
@@ -1482,13 +1480,10 @@ def render_edit_form():
             return txt(cur) == ("" if v is None else str(v))
 
         changed = [k for k, v in after.items() if not same(k, v)]
-        save_label = f"物件情報を保存（{len(changed)} 項目）"
-        saved_top = save_top.button(save_label, type="primary",
-                                    key=f"edit_save_top_{prop['id']}", disabled=not changed)
-        saved = st.button(save_label, type="primary",
+        saved = st.button(f"物件情報を保存（{len(changed)} 項目）", type="primary",
                           key=f"edit_save_{prop['id']}", disabled=not changed)
 
-    if saved or saved_top:
+    if saved:
         execute(UPDATE_SQL, {
             "id": str(prop["id"]),
             "reply_date": f_reply, "address": blank_to_none(f_addr),
@@ -1496,7 +1491,7 @@ def render_edit_form():
             "contact_method": blank_to_none(f_contact),
             "inquiry_channel": blank_to_none(f_channel),
             "has_elevator": blank_to_none(f_ev), "has_septic_tank": blank_to_none(f_septic),
-            "free_internet": blank_to_none(f_net), "hazard": blank_to_none(f_hazard),
+            "free_internet": blank_to_none(f_net),
             "occupied_units": f_occ, "total_units": f_total,
             "parking_spaces": f_park, "external_parking": blank_to_none(f_expark),
             "structure": f_struct, "built_date": f_built,
@@ -1511,10 +1506,7 @@ def render_edit_form():
             "bank_offered_rate": f_rate, "legal_useful_life": f_life,
             "scenario_label": blank_to_none(f_label),
             "input_memo": blank_to_none(f_input_memo),
-            "location_note": blank_to_none(f_location),
-            "floor_plan": blank_to_none(f_plan), "management_company": blank_to_none(f_pm),
-            "rental_agents": blank_to_none(f_agents), "seller_info": blank_to_none(f_seller),
-            "lender": blank_to_none(f_lender), "loan_terms": blank_to_none(f_terms),
+            "floor_plan": blank_to_none(f_plan),
         })
         st.toast("保存しました。", icon=":material/check:")
         st.rerun()
