@@ -9,6 +9,7 @@ PMT・税金などの計算式そのものはすべてSQL側の re_calc_property
 2点だけ実際に評価してもらい、そこから「判定値150/200に乗る価格」を代数で解く。
 """
 import datetime
+import html
 import json
 import re
 import uuid
@@ -17,6 +18,7 @@ from urllib.request import urlopen
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from db import execute, query, refresh_calc_cache
 from nav import goto_office_edit
@@ -127,10 +129,15 @@ HAZARD_LAYERS = (
 )
 
 
+def first_lot(address: str) -> str:
+    """複数の地番が並ぶ所在地の、先頭の地番までを返す。"""
+    return re.split(r"[、,・]", address)[0].strip()
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def geocode(address: str):
     """住所を (経度, 緯度) にする（国土地理院）。取れなければ None。複数の地番は先頭だけ使う。"""
-    first = re.split(r"[、,・]", address)[0].strip()
+    first = first_lot(address)
     if not first:
         return None
     url = "https://msearch.gsi.go.jp/address-search/AddressSearch?q=" + quote(first)
@@ -156,6 +163,50 @@ def city_of(address: str) -> str:
     return m[1] if m else ""
 
 
+def chikamap_url(address: str) -> str:
+    """全国地価マップの相続税路線価を、住所から求めた地点の近くで開く URL。"""
+    pos = geocode(address)
+    if not pos:
+        return f"https://www.chikamap.jp/chikamap/Portal?mid={CHIKAMAP_ROSENKA_MID}"
+    lon, lat = to_tokyo_datum(*pos)
+    return (f"https://www.chikamap.jp/chikamap/Map?mid={CHIKAMAP_ROSENKA_MID}"
+            f"&mpx={lon:.7f}&mpy={lat:.7f}&mps=1000")
+
+
+def copy_link_button(label: str, url: str, text: str) -> None:
+    """文字列をコピーしてからリンクを開くボタン。見た目は st.link_button に合わせる。
+
+    全国地価マップは URL で住所を受け取れないので、検索欄へ貼り付けられるようにする。
+    **リンク自体は a タグなので、コピーに失敗しても開くことはできる。**
+    """
+    components.html(f"""
+      <a id="b" href="{html.escape(url)}" target="_blank" rel="noopener">{html.escape(label)}</a>
+      <style>
+        body {{ margin: 0; }}
+        a {{ display: flex; align-items: center; justify-content: center; box-sizing: border-box;
+             height: 40px; padding: 0 .4rem; border: 1px solid #C9D2E0; border-radius: .4rem;
+             color: #222222; text-decoration: none; text-align: center; line-height: 1.15;
+             font: 14px "Source Sans", sans-serif; }}
+        a:hover {{ border-color: #1F3864; color: #1F3864; }}
+      </style>
+      <script>
+        const b = document.getElementById("b");
+        const text = {json.dumps(text)};
+        // 新しいタブが開くと元の画面からフォーカスが外れ、navigator.clipboard は失敗する。
+        // 開く前に同期で終わる execCommand でコピーする
+        b.addEventListener("click", () => {{
+          const t = document.createElement("textarea");
+          t.value = text;
+          document.body.appendChild(t);
+          t.select();
+          const ok = document.execCommand("copy");
+          t.remove();
+          b.textContent = ok ? "住所をコピーしました" : "コピーできませんでした";
+        }});
+      </script>
+    """, height=42)
+
+
 def property_links(address: str, name: str) -> list:
     """確認事項のリンク（ボタン名, URL）。URL が空ならボタンは押せない。"""
     # 物件名の2行目以降は版の注記なので検索語に入れない
@@ -164,18 +215,13 @@ def property_links(address: str, name: str) -> list:
     maps = "https://www.google.com/maps/search/?api=1&query="
     pos = geocode(address)
     hazard = "https://disaportal.gsi.go.jp/hazardmap/maps/index.html"
-    chika = f"https://www.chikamap.jp/chikamap/Portal?mid={CHIKAMAP_ROSENKA_MID}"
     if pos:
         hazard += f"?ll={pos[1]},{pos[0]}&z=16&base=pale&{HAZARD_LAYERS}"
-        lon, lat = to_tokyo_datum(*pos)
-        chika = (f"https://www.chikamap.jp/chikamap/Map?mid={CHIKAMAP_ROSENKA_MID}"
-                 f"&mpx={lon:.7f}&mpy={lat:.7f}&mps=1000")
     return [
         ("Googleマップ（物件名）", maps + quote(named) if name else ""),
         ("Googleマップ（住所）", maps + quote(address) if address else ""),
         ("募集ページを検索", "https://www.google.com/search?q=" + quote(named) if name else ""),
         ("重ねるハザードマップ", hazard),
-        ("全国地価マップ", chika),
     ]
 
 
@@ -1337,10 +1383,14 @@ def render_edit_form():
         st.divider()
         st.markdown("**確認事項**")
         links = property_links(txt(prop["address"]), txt(prop["name"]))
-        for col, (label, url) in zip(st.columns(len(links)), links):
+        cols = st.columns(len(links) + 1)
+        for col, (label, url) in zip(cols, links):
             col.link_button(label, url, use_container_width=True, disabled=not url)
-        st.caption("ハザードマップと全国地価マップは、住所から求めた地点を開く（地番まで合わず町の中心になることがある）。"
-                   "全国地価マップは「同意する」を押すとその地点へ進む")
+        with cols[-1]:
+            copy_link_button("全国地価マップ（住所コピー）", chikamap_url(txt(prop["address"])),
+                             first_lot(txt(prop["address"])))
+        st.caption("ハザードマップと全国地価マップは、住所から求めた地点の近くを開く（地番まで合わないことがある）。"
+                   "全国地価マップは、同意したあと検索欄に貼り付けて検索すると正確な場所へ動く")
         c = st.columns(3)
         f_hazard = marked(c[0], prop, "hazard", st.text_input, "ハザード",
                           value=txt(prop["hazard"]), placeholder="例：浸水／土砂災害／津波5m")
