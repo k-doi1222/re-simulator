@@ -43,9 +43,17 @@ def compact_css(table_vh: str = TABLE_VH) -> None:
       div[class*="st-key-editline"] button:hover p,
       div[class*="st-key-editline"] button:hover span {{ color: #1d1d1f; }}
 
-      /* 物件の確認事項。空欄（まだ確認していない項目）を暖色で目立たせる。 */
-      div[class*="st-key-check_empty"] input {{ background-color: #FFD8B8; }}
-      div[class*="st-key-check_empty"] label p {{ color: #B8480A; font-weight: 600; }}
+      /* 物件情報の入力欄（detail.marked）。空欄は暖色、費用に効く「あり」は青。 */
+      div[class*="st-key-mark_empty"] input,
+      div[class*="st-key-mark_empty"] [data-testid="stSelectbox"] [role="group"],
+      div[class*="st-key-mark_empty"] [data-testid="stNumberInputContainer"],
+      div[class*="st-key-mark_empty"] [data-testid="stNumberInputContainer"] button {{
+          background-color: #FFD8B8;
+      }}
+      div[class*="st-key-mark_empty"] label p {{ color: #B8480A; font-weight: 600; }}
+      div[class*="st-key-mark_on"] [data-testid="stSelectbox"] [role="group"],
+      div[class*="st-key-mark_on"] input {{ background-color: #CFE2FF; }}
+      div[class*="st-key-mark_on"] label p {{ color: #1F4FA8; font-weight: 600; }}
 
       /* 担当者のまとめメモ（第2層）。長いものは「続きを読む」で畳む。
          枠を増やさないよう、Streamlitのexpanderではなく details で作っている。 */

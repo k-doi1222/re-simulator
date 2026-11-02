@@ -37,7 +37,7 @@ RAW_COLS = """
     p.property_tax,
     p.occupied_units, p.total_units, p.parking_spaces, p.external_parking,
     p.has_elevator, p.has_septic_tank, p.free_internet, p.hazard,
-    p.floor_plan, p.management_company, p.rental_agents, p.seller_info, p.lender, p.loan_terms,
+    p.no_road_price, p.floor_plan, p.management_company, p.rental_agents, p.seller_info, p.lender, p.loan_terms,
     p.legal_useful_life, p.bank_offered_rate, p.scenario_label,
     coalesce(p.legal_useful_life, re_useful_life_by_structure(p.structure)) as useful_life,
     -- 金利は銀行提示金利を優先し、空なら標準（re_standard_interest_rate）。一覧のキャッシュと同じ決め方
@@ -96,7 +96,7 @@ UPDATE_SQL = """
       parking_spaces = :parking_spaces, external_parking = :external_parking,
       structure = :structure, built_date = :built_date,
       purchase_price = :purchase_price, negotiated_price = :negotiated_price,
-      road_price_actual = :road_price_actual, property_tax = :property_tax,
+      road_price_actual = :road_price_actual, no_road_price = :no_road_price, property_tax = :property_tax,
       land_area = :land_area, zoning = :zoning,
       zone_coef = :zone_coef, shape_coef = :shape_coef, floor_area = :floor_area,
       full_income = :full_income, current_income = :current_income, extra_cost = :extra_cost,
@@ -112,13 +112,22 @@ UPDATE_SQL = """
 ARINASHI = ["", "あり", "なし"]
 
 
-def check_input(col, prop, column, label, placeholder):
-    """確認事項の入力欄。空欄の間は暖色で出す（色は theme.compact_css の check_empty）。"""
-    key = f"check_{prop['id']}_{column}"
-    value = st.session_state.get(key, txt(prop[column]))
-    state = "ok" if str(value).strip() else "empty"
-    with col.container(key=f"check_{state}_{column}"):
-        return st.text_input(label, txt(prop[column]), key=key, placeholder=placeholder)
+def marked(col, prop, column, widget, label, *, blue=False, filled=False, **kw):
+    """空欄を暖色、blue=True の「あり」を青で出す入力欄（色は theme.compact_css の mark_）。
+
+    色を決めるには描画前に今の値が要るので key を付ける。**key に DB の値を含める。**
+    含めないと、指値の保存など別の場所で DB が変わっても入力欄が古い値のまま残り、
+    次の保存で上書きしてしまう。filled=True は空欄でも色を付けない（路線価なし）。
+    """
+    key = f"mark_{prop['id']}_{column}_{prop[column]}"
+    initial = kw["options"][kw["index"]] if "options" in kw else kw.get("value")
+    cur = st.session_state.get(key, initial)
+    if not filled and (cur is None or str(cur).strip() == ""):
+        state = "empty"
+    else:
+        state = "on" if blue and cur == "あり" else "ok"
+    with col.container(key=f"mark_{state}_{column}"):
+        return widget(label, key=key, **kw)
 
 
 def num(v):
@@ -1161,29 +1170,35 @@ def render_edit_form():
         # AB〜AI 設備・状況
         c = st.columns(8)
 
-        def pick(col, label, cur, help=None):
+        def pick(col, column, label, help=None):
             """あり・なしの欄。**選択肢に無い値でも今の値を選択肢に足して見せる。**
 
             勝手に空欄へ倒すと、開いただけで「変更あり」になり、気づかず保存すると
             値が消える（GASが「無」と書いた物件で実際に起きた。2026-09-20）。
+            「あり」は費用の追加に効くので青で目立たせる。
             """
-            v = txt(cur)
+            v = txt(prop[column])
             opts = ARINASHI if v in ARINASHI else ARINASHI + [v]
-            return col.selectbox(label, opts, index=opts.index(v), help=help)
+            return marked(col, prop, column, st.selectbox, label, blue=True,
+                          options=opts, index=opts.index(v), help=help)
 
-        f_ev = pick(c[0], "EV", prop["has_elevator"])
-        f_septic = pick(c[1], "浄化槽", prop["has_septic_tank"])
-        f_net = pick(c[2], "無料NET/CATV", prop["free_internet"],
+        f_ev = pick(c[0], "has_elevator", "EV")
+        f_septic = pick(c[1], "has_septic_tank", "浄化槽")
+        f_net = pick(c[2], "free_internet", "無料NET/CATV",
                      help="元Excel AD列。ケーブルテレビ・インターネットの無料提供")
-        f_occ = c[3].number_input("入居数", value=num(prop["occupied_units"]),
-                                  step=1.0, format="%.0f")
-        f_total = c[4].number_input("戸数", value=num(prop["total_units"]),
-                                    step=1.0, format="%.0f")
+        f_occ = marked(c[3], prop, "occupied_units", st.number_input, "入居数",
+                       value=num(prop["occupied_units"]),
+                       step=1.0, format="%.0f")
+        f_total = marked(c[4], prop, "total_units", st.number_input, "戸数",
+                         value=num(prop["total_units"]),
+                         step=1.0, format="%.0f")
         # 駐車場の必要数は間取りで戸数の100〜300%に変わるので、戸数と駐車場の間に置く
-        f_plan = check_input(c[5], prop, "floor_plan", "間取り", "2LDK／1K")
-        f_park = c[6].number_input("駐車場", value=num(prop["parking_spaces"]),
-                                   step=1.0, format="%.0f")
-        f_expark = c[7].text_input("敷地外駐車場", txt(prop["external_parking"]))
+        f_plan = marked(c[5], prop, "floor_plan", st.text_input, "間取り",
+                        value=txt(prop["floor_plan"]), placeholder="2LDK／1K")
+        f_park = marked(c[6], prop, "parking_spaces", st.number_input, "駐車場",
+                        value=num(prop["parking_spaces"]),
+                        step=1.0, format="%.0f")
+        f_expark = pick(c[7], "external_parking", "敷地外駐車場")
 
         # AL / AM / AR / AU / AW ＋ 構造
         # 金額・面積・年収は整数で表示する（format は見た目だけを変え、値は保持される）。
@@ -1192,41 +1207,54 @@ def render_edit_form():
         cur_st = txt(prop["structure"])
         # 構造も同じ。マスターに無い値でも、今の値をそのまま見せる（勝手に倒さない）
         st_opts = structures if cur_st in structures else structures + [cur_st]
-        f_struct = c[0].selectbox("構造", st_opts, index=st_opts.index(cur_st))
-        f_built = c[1].date_input("建築日", day(prop["built_date"]),
-                                  min_value=datetime.date(1950, 1, 1))
-        f_price = c[2].number_input("販売価格(万円)", value=num(prop["purchase_price"]),
-                                    step=10.0, format="%.0f")
-        f_nego = c[3].number_input("指値後物件価格(万円)", value=num(prop["negotiated_price"]),
-                                   step=10.0, format="%.0f")
-        f_road = c[4].number_input("路価実", value=num(prop["road_price_actual"]),
-                                   step=0.1, format="%.1f", help="空欄なら 1.0 として計算")
-        f_tax = c[5].number_input("固税実(万円)", value=num(prop["property_tax"]),
-                                  step=1.0, format="%.0f",
-                                  help="空欄なら建物評価から自動で仮計算")
+        f_struct = marked(c[0], prop, "structure", st.selectbox, "構造",
+                          options=st_opts, index=st_opts.index(cur_st))
+        f_built = marked(c[1], prop, "built_date", st.date_input, "建築日", value=day(prop["built_date"]),
+                         min_value=datetime.date(1950, 1, 1))
+        f_price = marked(c[2], prop, "purchase_price", st.number_input, "販売価格(万円)",
+                         value=num(prop["purchase_price"]),
+                         step=10.0, format="%.0f")
+        f_nego = marked(c[3], prop, "negotiated_price", st.number_input, "指値後物件価格(万円)",
+                        value=num(prop["negotiated_price"]),
+                        step=10.0, format="%.0f")
+        # 路線価がない地域は空欄が正しいので、印を付けたら色を消す。計算は空欄と同じ（1.0）
+        no_road_key = f"no_road_{prop['id']}_{prop['no_road_price']}"
+        no_road = st.session_state.get(no_road_key, bool(prop["no_road_price"]))
+        f_road = marked(c[4], prop, "road_price_actual", st.number_input, "路価実", filled=no_road,
+                        value=num(prop["road_price_actual"]),
+                        step=0.1, format="%.1f", help="空欄なら 1.0 として計算")
+        f_no_road = c[4].checkbox("路線価なし", value=bool(prop["no_road_price"]), key=no_road_key)
+        f_tax = marked(c[5], prop, "property_tax", st.number_input, "固税実(万円)",
+                       value=num(prop["property_tax"]),
+                       step=1.0, format="%.0f",
+                       help="空欄なら建物評価から自動で仮計算")
 
         # AX / AY / AZ / BA / BC
         c = st.columns(5)
-        f_land = c[0].number_input("土地面積(㎡)", value=num(prop["land_area"]),
-                                   step=1.0, format="%.0f")
-        f_zoning = c[1].text_input("用途地域", txt(prop["zoning"]))
+        f_land = marked(c[0], prop, "land_area", st.number_input, "土地面積(㎡)",
+                        value=num(prop["land_area"]),
+                        step=1.0, format="%.0f")
+        f_zoning = marked(c[1], prop, "zoning", st.text_input, "用途地域", value=txt(prop["zoning"]))
         zc, sc = num(prop["zone_coef"]), num(prop["shape_coef"])
-        f_zcoef_pct = c[2].number_input("用途地域係数(%)",
-                                        value=None if zc is None else round(zc * 100),
-                                        step=5, format="%d",
-                                        help="商業110 近商105 住居100 準工80 工業70")
-        f_scoef_pct = c[3].number_input("土地形状係数(%)",
-                                        value=None if sc is None else round(sc * 100),
-                                        step=5, format="%d")
-        f_floor = c[4].number_input("延床面積(㎡)", value=num(prop["floor_area"]),
-                                    step=1.0, format="%.0f")
+        f_zcoef_pct = marked(c[2], prop, "zone_coef", st.number_input, "用途地域係数(%)",
+                             value=None if zc is None else round(zc * 100),
+                             step=5, format="%d",
+                             help="商業110 近商105 住居100 準工80 工業70")
+        f_scoef_pct = marked(c[3], prop, "shape_coef", st.number_input, "土地形状係数(%)",
+                             value=None if sc is None else round(sc * 100),
+                             step=5, format="%d")
+        f_floor = marked(c[4], prop, "floor_area", st.number_input, "延床面積(㎡)",
+                         value=num(prop["floor_area"]),
+                         step=1.0, format="%.0f")
 
         # BD / BE / BH ＋ 計算の前提
         c = st.columns(5)
-        f_full = c[0].number_input("満室年収(万円)", value=num(prop["full_income"]),
-                                   step=1.0, format="%.0f")
-        f_curr = c[1].number_input("現況年収(万円)", value=num(prop["current_income"]),
-                                   step=1.0, format="%.0f")
+        f_full = marked(c[0], prop, "full_income", st.number_input, "満室年収(万円)",
+                        value=num(prop["full_income"]),
+                        step=1.0, format="%.0f")
+        f_curr = marked(c[1], prop, "current_income", st.number_input, "現況年収(万円)",
+                        value=num(prop["current_income"]),
+                        step=1.0, format="%.0f")
         f_extra = c[2].number_input("EV費等の追加(万円)", value=num(prop["extra_cost"]),
                                     step=1.0, format="%.0f",
                                     help="CATV・インターネット・浄化槽の維持費などの年額")
@@ -1252,15 +1280,19 @@ def render_edit_form():
                          "https://www.google.com/search?q=" + quote(f"{txt(prop['address'])} 賃貸 募集"),
                          use_container_width=True, disabled=not address)
         c = st.columns(3)
-        f_hazard = check_input(c[0], prop, "hazard", "ハザード", "例：浸水／土砂災害／津波5m")
-        f_pm = check_input(c[1], prop, "management_company", "管理会社", "看板や資料で確認")
-        f_agents = check_input(c[2], prop, "rental_agents", "仲介業者",
-                               "例：賃貸仲介の社名／一般媒介／〇〇専任")
+        f_hazard = marked(c[0], prop, "hazard", st.text_input, "ハザード",
+                          value=txt(prop["hazard"]), placeholder="例：浸水／土砂災害／津波5m")
+        f_pm = marked(c[1], prop, "management_company", st.text_input, "管理会社",
+                      value=txt(prop["management_company"]), placeholder="看板や資料で確認")
+        f_agents = marked(c[2], prop, "rental_agents", st.text_input, "仲介業者",
+                          value=txt(prop["rental_agents"]), placeholder="例：賃貸仲介の社名／一般媒介／〇〇専任")
         c = st.columns(3)
-        f_seller = check_input(c[0], prop, "seller_info", "売主",
-                               "例：個人／法人／地主／土地と建物で売主が違う")
-        f_lender = check_input(c[1], prop, "lender", "借入先", "分かれば。例：〇〇銀行")
-        f_terms = check_input(c[2], prop, "loan_terms", "借入金額・利率", "例：6000万円 2.0%")
+        f_seller = marked(c[0], prop, "seller_info", st.text_input, "売主",
+                          value=txt(prop["seller_info"]), placeholder="例：個人／法人／地主／土地と建物で売主が違う")
+        f_lender = marked(c[1], prop, "lender", st.text_input, "借入先",
+                          value=txt(prop["lender"]), placeholder="分かれば。例：〇〇銀行")
+        f_terms = marked(c[2], prop, "loan_terms", st.text_input, "借入金額・利率",
+                         value=txt(prop["loan_terms"]), placeholder="例：6000万円 2.0%")
 
         after = {
             "reply_date": f_reply, "address": blank_to_none(f_addr),
@@ -1273,7 +1305,7 @@ def render_edit_form():
             "parking_spaces": f_park, "external_parking": blank_to_none(f_expark),
             "structure": f_struct, "built_date": f_built,
             "purchase_price": f_price, "negotiated_price": f_nego,
-            "road_price_actual": f_road, "property_tax": f_tax,
+            "road_price_actual": f_road, "no_road_price": f_no_road, "property_tax": f_tax,
             "land_area": f_land, "zoning": blank_to_none(f_zoning),
             "zone_coef": None if f_zcoef_pct is None else f_zcoef_pct / 100,
             "shape_coef": None if f_scoef_pct is None else f_scoef_pct / 100,
@@ -1290,6 +1322,8 @@ def render_edit_form():
         def same(k, v):
             """DBの今の値と、入力された値を比べる。型と丸めのゆれを吸収する。"""
             cur = prop[k] if k in prop else None
+            if k == "no_road_price":
+                return bool(cur) == v
             if k in ("zone_coef", "shape_coef", "bank_offered_rate"):
                 # 画面は%（100倍）で入力する。往復で出る微小な誤差は同じ扱いにする
                 a, b = num(cur), v
@@ -1319,7 +1353,7 @@ def render_edit_form():
             "parking_spaces": f_park, "external_parking": blank_to_none(f_expark),
             "structure": f_struct, "built_date": f_built,
             "purchase_price": f_price, "negotiated_price": f_nego,
-            "road_price_actual": f_road, "property_tax": f_tax,
+            "road_price_actual": f_road, "no_road_price": f_no_road, "property_tax": f_tax,
             "land_area": f_land, "zoning": blank_to_none(f_zoning),
             # 係数は画面では%で入力してもらうので、保存時に100で割って元に戻す
             "zone_coef": None if f_zcoef_pct is None else f_zcoef_pct / 100,
