@@ -1416,17 +1416,16 @@ def render_edit_form():
         st.caption("ハザードマップと全国地価マップは、住所から求めた地点の近くを開く（地番まで合わないことがある）。"
                    "全国地価マップは、同意したあと検索欄に貼り付けて検索すると正確な場所へ動く")
         # 地図を見て埋める項目を先に、そのあとにハザードを置く
-        c = st.columns([2, 1])
-        f_location = marked(c[0], prop, "location_note", st.text_input, "立地の概要",
+        f_location = marked(st, prop, "location_note", st.text_input, "立地の概要",
                             value=txt(prop["location_note"]),
                             placeholder="どんな場所か思い出すためのメモ。例：〇〇の近く／〇〇と〇〇の間")
-        f_pm = marked(c[1], prop, "management_company", st.text_input, "管理会社",
+        c = st.columns(3)
+        f_pm = marked(c[0], prop, "management_company", st.text_input, "管理会社",
                       value=txt(prop["management_company"]), placeholder="看板や資料で確認")
-        c = st.columns([2, 1])
-        f_agents = marked(c[0], prop, "rental_agents", st.text_input, "仲介業者",
+        f_agents = marked(c[1], prop, "rental_agents", st.text_input, "仲介業者",
                           value=txt(prop["rental_agents"]),
                           placeholder="例：賃貸仲介の社名／一般媒介／〇〇専任")
-        f_hazard = marked(c[1], prop, "hazard", st.text_input, "ハザード",
+        f_hazard = marked(c[2], prop, "hazard", st.text_input, "ハザード",
                           value=txt(prop["hazard"]), placeholder="例：浸水／土砂災害／津波5m")
         c = st.columns(3)
         f_seller = marked(c[0], prop, "seller_info", st.text_input, "売主",
