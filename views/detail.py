@@ -600,7 +600,11 @@ def render_memo():
 
     # 確認事項。どれも計算には使わないが、取り組むかの判断に使い、後で見返す。
     # 空欄を暖色にして、まだ確認していない項目が分かるようにする（marked）。
-    # よく見るので物件情報の入力欄から出した。保存ボタンはメモと1つにする（上の理由と同じ）
+    # よく見るので物件情報の入力欄から出した。保存はメモと共通（上の理由と同じ）。
+    # メモを直したときに押しやすいよう手前にも同じボタンを置く。押せるかどうかは確認事項の
+    # 入力まで見ないと決まらないので、場所だけ取っておき、下で n を出してから中身を入れる
+    save_top = st.container()
+    st.divider()
     st.markdown("**確認事項**")
     links = property_links(txt(prop["address"]), txt(prop["name"]))
     cols = st.columns(len(links) + 1)
@@ -609,8 +613,6 @@ def render_memo():
     with cols[-1]:
         copy_link_button("全国地価マップ（住所コピー）", chikamap_url(txt(prop["address"])),
                          first_lot(txt(prop["address"])))
-    st.caption("ハザードマップと全国地価マップは、住所から求めた地点の近くを開く（地番まで合わないことがある）。"
-               "全国地価マップは、同意したあと検索欄に貼り付けて検索すると正確な場所へ動く")
     # 地図を見て埋める項目を先に、そのあとにハザードを置く
     f_location = marked(st, prop, "location_note", st.text_input, "立地の概要",
                         value=txt(prop["location_note"]),
@@ -636,8 +638,12 @@ def render_memo():
              m_broker != txt(prop["broker_comment"]),
              new_bank != bank_since, new_broker != broker_since,
              *[v != txt(prop[k]) for k, v in checks.items()]])
-    if st.button(f"保存（{n} 項目）", type="primary", key=f"memo_save_{prop['id']}",
-                 disabled=(n == 0)):
+    save_label = f"保存（{n} 項目）"
+    saved_top = save_top.button(save_label, type="primary", key=f"memo_save_top_{prop['id']}",
+                                disabled=(n == 0))
+    saved = st.button(save_label, type="primary", key=f"memo_save_{prop['id']}",
+                      disabled=(n == 0))
+    if saved or saved_top:
         execute("""
             update re_properties
                set status = :s, memo = :memo, broker_comment = :broker,
