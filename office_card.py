@@ -232,6 +232,8 @@ def render_office_card(company_kind: str, office_id: str) -> None:
         st.caption("　／　".join(info))
     _import_note(office_id, h["申し送り"])
     _summary_memo(h["メモ"])
+    if company_kind == "bank":
+        _loan_terms_view(office_id)
 
     _office_info_block(company_kind, office_id, h)
     st.markdown("##### 担当者")
@@ -334,6 +336,40 @@ def _office_info_block(company_kind: str, office_id: str, h: pd.Series) -> None:
 
     if company_kind == "bank":
         _loan_terms_block(office_id)
+
+
+def _loan_terms_view(office_id: str) -> None:
+    """銀行の融資条件を読める形で出す（拠点の基本情報なので、折りたたみの中に隠さない）。
+
+    直すときは下の「融資条件を直す」から。元Excelの「−」「－(未確認)」もそのまま出す
+    （未確認と未登録を区別できるように）。
+    """
+    t = query("""
+        select is_candidate, overall_rating, loan_area, loan_term_note,
+               interest_rate_note, loan_limit_note, full_loan_note, new_corp_note
+        from re_bank_loan_terms where office_id = cast(:oid as uuid)
+    """, {"oid": office_id})
+    if t.empty:
+        st.caption("融資条件はまだ登録されていません（「融資条件を直す」から書けます）")
+        return
+    r = t.iloc[0]
+    items = [("総合評価", "overall_rating"), ("融資エリア", "loan_area"),
+             ("融資期間", "loan_term_note"), ("金利", "interest_rate_note"),
+             ("融資上限", "loan_limit_note"), ("フルローン", "full_loan_note"),
+             ("新設法人", "new_corp_note"), ("候補", "is_candidate")]
+
+    def val(k):
+        x = r.get(k)
+        s = "" if x is None or pd.isna(x) else " ".join(str(x).split())
+        return s or "—"
+
+    with st.container(border=True):
+        st.markdown("**融資条件**")
+        for row in (items[:4], items[4:]):
+            cols = st.columns(len(row))
+            for col, (lab, k) in zip(cols, row):
+                col.caption(lab)
+                col.markdown(val(k))
 
 
 def _loan_terms_block(office_id: str) -> None:
